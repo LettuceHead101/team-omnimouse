@@ -20,6 +20,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\..\..\Desktop\OmnimouseProject\OmniMouse\src\OmniMouse.Core\OmniMouse.Core.csproj" />
+    <ProjectReference Include="..\src\OmniMouse.Core\OmniMouse.Core.csproj" />
   </ItemGroup>
 
 </Project>
