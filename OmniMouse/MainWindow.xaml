@@ -6,11 +6,8 @@
         <StackPanel Orientation="Horizontal" Margin="10" DockPanel.Dock="Top">
             <Button Name="HostButton" Content="Host" Width="100" Margin="0,0,10,0" Click="HostButton_Click"/>
             <Button Name="CohostButton" Content="Cohost" Width="100" Margin="0,0,10,0" Click="CohostButton_Click"/>
-            <TextBox Name="HostIpBox"
-                     Width="200"
-                     Margin="0,0,10,0"
-                     VerticalAlignment="Center"
-                     ToolTip="Enter host IP for cohost mode"/>
+            <Button Name="DisconnectButton" Content="Disconnect" Width="120" Margin="0,0,10,0" Click="DisconnectButton_Click"/>
+            <TextBox Name="HostIpBox" Width="200" Margin="0,0,10,0" VerticalAlignment="Center" ToolTip="Enter host IP for cohost mode"/>
         </StackPanel>
         <TextBlock Text="OmniMouse Input/Output Log"
                    FontWeight="Bold"

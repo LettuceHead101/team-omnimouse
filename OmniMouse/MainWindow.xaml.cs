@@ -22,6 +22,7 @@ namespace OmniMouse
             HostButton.IsEnabled = enabled;
             CohostButton.IsEnabled = enabled;
             HostIpBox.IsEnabled = enabled;
+            DisconnectButton.IsEnabled = !enabled; // Only enable Disconnect when connected
         }
 
         // Host = sender (controls the cohost). Requires the cohost's IP in HostIpBox.
@@ -89,6 +90,17 @@ namespace OmniMouse
                 _hooks?.UninstallHooks();
             }
             base.OnClosed(e);
+        }
+
+        private void DisconnectButton_Click(object sender, RoutedEventArgs e)
+        {
+            Console.WriteLine("Disconnecting session...");
+            _hooks?.UninstallHooks();
+            _udp?.Disconnect();
+            _hooks = null;
+            _udp = null;
+            _isSender = false;
+            SetUiEnabled(true);
         }
     }
 }

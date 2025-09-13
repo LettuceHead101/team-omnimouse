@@ -12,6 +12,7 @@ namespace OmniMouse.Network
         void StartHost();
         void StartCoHost(string hostIp);
         void SendMousePosition(int x, int y);
+        void Disconnect();
     }
 
     public class UdpMouseTransmitter : IUdpMouseTransmitter
@@ -72,6 +73,23 @@ namespace OmniMouse.Network
                 {
                     Console.WriteLine($"[UDP][Send] Error sending packet: {ex.Message}");
                 }
+            }
+        }
+
+        public void Disconnect()
+        {
+            try
+            {
+                _udpClient?.Close();
+                _udpClient = null;
+                _remoteEndPoint = null;
+                _isCoHost = false;
+                _hostIp = "";
+                Console.WriteLine("[UDP] Disconnected.");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[UDP][Disconnect] Error: {ex.Message}");
             }
         }
 
