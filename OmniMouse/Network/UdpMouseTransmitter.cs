@@ -24,27 +24,54 @@ namespace OmniMouse.Network
 
         public void StartHost()
         {
-            _udpClient = new UdpClient(UdpPort);
-            Console.WriteLine($"Listening for UDP packets on port {UdpPort}...");
-            new Thread(ReceiveMouseLoopUDP) { IsBackground = true }.Start();
+            try
+            {
+                var client = new UdpClient(UdpPort);
+                // allow reuse (optional)
+                client.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
+                _udpClient = client;
+                Console.WriteLine($"[UDP] Listening for UDP packets on port {UdpPort}...");
+                new Thread(ReceiveMouseLoopUDP) { IsBackground = true }.Start();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[UDP][StartHost] Failed to start listener: {ex.Message}");
+                throw;
+            }
         }
 
         public void StartCoHost(string hostIp)
         {
-            _isCoHost = true;
-            _hostIp = hostIp;
-            _udpClient = new UdpClient();
-            _remoteEndPoint = new IPEndPoint(IPAddress.Parse(hostIp), UdpPort);
-            Console.WriteLine($"Sending mouse positions to {hostIp}:{UdpPort} via UDP...");
+            try
+            {
+                _isCoHost = true;
+                _hostIp = hostIp;
+                _udpClient = new UdpClient(); // ephemeral local port
+                _remoteEndPoint = new IPEndPoint(IPAddress.Parse(hostIp), UdpPort);
+                Console.WriteLine($"[UDP] Sending mouse positions to {_remoteEndPoint.Address}:{_remoteEndPoint.Port} via UDP...");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[UDP][StartCoHost] Failed to configure sender: {ex.Message}");
+                throw;
+            }
         }
 
         public void SendMousePosition(int x, int y)
         {
             if (_isCoHost && _udpClient != null && _remoteEndPoint != null)
             {
-                var packet = new OmniMouse.Core.Packets.MousePacket { X = x, Y = y };
-                var msg = MessagePackSerializer.Serialize(packet);
-                try { _udpClient.Send(msg, msg.Length, _remoteEndPoint); } catch { }
+                try
+                {
+                    var packet = new MousePacket { X = x, Y = y };
+                    var msg = MessagePackSerializer.Serialize(packet);
+                    int sent = _udpClient.Send(msg, msg.Length, _remoteEndPoint);
+                    Console.WriteLine($"[UDP][Send] Sent {sent} bytes to {_remoteEndPoint.Address}:{_remoteEndPoint.Port} -> ({x},{y})");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[UDP][Send] Error sending packet: {ex.Message}");
+                }
             }
         }
 
@@ -58,11 +85,29 @@ namespace OmniMouse.Network
                     if (_udpClient != null)
                     {
                         var data = _udpClient.Receive(ref ep);
-                        var packet = MessagePackSerializer.Deserialize<OmniMouse.Core.Packets.MousePacket>(data);
-                        SetCursorPos(packet.X, packet.Y);
+                        Console.WriteLine($"[UDP][Receive] Received {data.Length} bytes from {ep.Address}:{ep.Port}");
+                        try
+                        {
+                            var packet = MessagePackSerializer.Deserialize<MousePacket>(data);
+                            Console.WriteLine($"[UDP][Receive] Moving cursor to ({packet.X},{packet.Y})");
+                            SetCursorPos(packet.X, packet.Y);
+                        }
+                        catch (Exception exInner)
+                        {
+                            Console.WriteLine($"[UDP][Receive] Failed to deserialize or apply packet: {exInner.Message}");
+                        }
                     }
                 }
-                catch { Thread.Sleep(10); }
+                catch (SocketException sockEx)
+                {
+                    Console.WriteLine($"[UDP][Receive] SocketException: {sockEx.Message}");
+                    Thread.Sleep(100);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[UDP][Receive] Exception: {ex.Message}");
+                    Thread.Sleep(100);
+                }
             }
         }
 
