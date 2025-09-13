@@ -8,6 +8,7 @@ namespace OmniMouse
     {
         private InputHooks? _hooks;
         private UdpMouseTransmitter? _udp;
+        private bool _isSender = false; // true when this machine is sending input
 
         public MainWindow()
         {
@@ -23,28 +24,38 @@ namespace OmniMouse
             HostIpBox.IsEnabled = enabled;
         }
 
+        // Host = sender (controls the cohost). Requires the cohost's IP in HostIpBox.
         private void HostButton_Click(object sender, RoutedEventArgs e)
-        {
-            SetUiEnabled(false);
-            Console.WriteLine("Starting in Host mode...");
-            _udp = new UdpMouseTransmitter();
-            _udp.StartHost();
-            StartHooks(_udp);
-        }
-
-        private void CohostButton_Click(object sender, RoutedEventArgs e)
         {
             var ip = HostIpBox.Text.Trim();
             if (string.IsNullOrWhiteSpace(ip))
             {
-                Console.WriteLine("Please enter a host IP address for cohost mode.");
+                Console.WriteLine("Please enter the Cohost's IP address before starting Host mode (Host will send input to that IP).");
                 return;
             }
+
             SetUiEnabled(false);
-            Console.WriteLine($"Starting in Cohost mode, connecting to {ip}...");
+            Console.WriteLine($"Starting in Host mode (sender). Sending input to {ip}...");
             _udp = new UdpMouseTransmitter();
+            // StartCoHost configures the transmitter to send to a remote endpoint.
             _udp.StartCoHost(ip);
+
+            // As Host we must capture local input and send it — install hooks.
             StartHooks(_udp);
+            _isSender = true;
+        }
+
+        // Cohost = receiver (listens for incoming input and injects it). Does not send.
+        private void CohostButton_Click(object sender, RoutedEventArgs e)
+        {
+            SetUiEnabled(false);
+            Console.WriteLine("Starting in Cohost mode (receiver). Listening for incoming input...");
+            _udp = new UdpMouseTransmitter();
+            // StartHost configures the transmitter to listen on the UDP port and inject on receive.
+            _udp.StartHost();
+
+            // Do NOT install input hooks here — the Cohost should not send its local input.
+            _isSender = false;
         }
 
         private void StartHooks(UdpMouseTransmitter udp)
@@ -72,7 +83,11 @@ namespace OmniMouse
         protected override void OnClosed(System.EventArgs e)
         {
             App.ConsoleOutputReceived -= OnConsoleOutputReceived;
-            _hooks?.UninstallHooks();
+            if (_isSender)
+            {
+                // If we installed hooks (because we're a sender/Host), uninstall them.
+                _hooks?.UninstallHooks();
+            }
             base.OnClosed(e);
         }
     }
