@@ -1,0 +1,30 @@
+﻿<UserControl x:Class="OmniMouse.Views.UserControls.HomePage"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             mc:Ignorable="d"
+             d:DesignHeight="450" d:DesignWidth="625">
+    
+    <DockPanel Background="White">
+        <StackPanel Orientation="Horizontal" Margin="10" DockPanel.Dock="Top">
+            <Button Name="HostButton" Content="Host" Width="100" Margin="0,0,10,0" Click="HostButton_Click"/>
+            <Button Name="CohostButton" Content="Cohost" Width="100" Margin="0,0,10,0" Click="CohostButton_Click"/>
+            <Button Name="DisconnectButton" Content="Disconnect" Width="120" Margin="0,0,10,0" Click="DisconnectButton_Click"/>
+            <TextBox Name="HostIpBox" Width="200" Margin="0,0,10,0" VerticalAlignment="Center" ToolTip="Enter host IP for cohost mode"/>
+        </StackPanel>
+        <TextBlock Text="OmniMouse Input/Output Log" FontWeight="Bold" FontSize="18" Margin="10" DockPanel.Dock="Top"/>
+        <TextBox Name="ConsoleOutputBox"
+                 VerticalScrollBarVisibility="Auto"
+                 HorizontalScrollBarVisibility="Auto"
+                 IsReadOnly="True"
+                 TextWrapping="Wrap"
+                 AcceptsReturn="True"
+                 FontFamily="Consolas"
+                 FontSize="14"
+                 Background="#FF1E1E1E"
+                 Foreground="White"
+                 Margin="10"
+                 DockPanel.Dock="Bottom"/>
+    </DockPanel>
+</UserControl>
