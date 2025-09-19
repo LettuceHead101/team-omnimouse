@@ -22,4 +22,8 @@
     <ProjectReference Include="..\src\OmniMouse.Core\OmniMouse.Core.csproj" />
   </ItemGroup>
 
+	<ItemGroup>
+		<Resource Include="Resources\Icon.png" />
+	</ItemGroup>
+
 </Project>
