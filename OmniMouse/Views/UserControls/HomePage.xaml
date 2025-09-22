@@ -7,7 +7,7 @@
              d:DesignHeight="450" d:DesignWidth="625">
 	<!-- will configure icon later, for now accepting refactor -->
 	<!-- Going to add resources here to change colors etc.-->
-	<Window.Resources>
+	<UserControl.Resources>
 		<SolidColorBrush x:Key="Bg" Color="#111315"/>
 		<SolidColorBrush x:Key="Card" Color="#1E1F22"/>
 		<SolidColorBrush x:Key="Ink" Color="#E5E7EB"/>
@@ -54,7 +54,7 @@
 			<Setter Property="HorizontalAlignment" Value="Left"/>
 		</Style>
 
-	</Window.Resources>
+	</UserControl.Resources>
 
 	<!-- Grid Layout here (more flexible than just dockpanel) -->
 	<Grid Margin="16">
