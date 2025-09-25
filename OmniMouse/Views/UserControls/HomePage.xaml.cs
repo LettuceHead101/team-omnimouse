@@ -1,19 +1,9 @@
 ﻿using OmniMouse.Hooks;
 using OmniMouse.Network;
+using OmniMouse.ViewModel;
 using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Data;
-using System.Windows.Documents;
-using System.Windows.Input;
-using System.Windows.Media;
-using System.Windows.Media.Imaging;
-using System.Windows.Navigation;
-using System.Windows.Shapes;
 
 namespace OmniMouse.Views.UserControls
 {
@@ -21,27 +11,23 @@ namespace OmniMouse.Views.UserControls
     {
         private InputHooks? _hooks;
         private UdpMouseTransmitter? _udp;
-        private bool _isSender = false;
 
+        private HomePageViewModel? ViewModel => DataContext as HomePageViewModel;
         public HomePage()
         {
             InitializeComponent();
-            Loaded += OnLoaded;
-            Unloaded += OnUnloaded;
         }
 
-        private void OnLoaded(object? s, RoutedEventArgs e)
+        private void OnLoaded(object sender, RoutedEventArgs e)
         {
-            App.ConsoleOutputReceived += OnConsoleOutputReceived;
-            SetUiEnabled(true);
+            // No need to add event handlers as they're now in the ViewModel
+            // The ViewModel constructor already subscribes to console output
         }
 
-        private void OnUnloaded(object? s, RoutedEventArgs e)
+        private void OnUnloaded(object sender, RoutedEventArgs e)
         {
-            App.ConsoleOutputReceived -= OnConsoleOutputReceived;
-            if (_isSender) _hooks?.UninstallHooks();
-            _udp?.Disconnect();
-            _hooks = null; _udp = null; _isSender = false;
+            // Clean up resources in the ViewModel
+            ViewModel?.Cleanup();
         }
 
         private void SetUiEnabled(bool enabled)
@@ -66,7 +52,6 @@ namespace OmniMouse.Views.UserControls
             _udp = new UdpMouseTransmitter();
             _udp.StartCoHost(ip);
             StartHooks(_udp);
-            _isSender = true;
         }
 
         private void CohostButton_Click(object sender, RoutedEventArgs e)
@@ -75,7 +60,6 @@ namespace OmniMouse.Views.UserControls
             Console.WriteLine("Starting Cohost (receiver). Listening...");
             _udp = new UdpMouseTransmitter();
             _udp.StartHost();
-            _isSender = false;
         }
 
         private void StartHooks(UdpMouseTransmitter udp)
@@ -86,21 +70,12 @@ namespace OmniMouse.Views.UserControls
             thread.Start();
         }
 
-        private void OnConsoleOutputReceived(string text)
-        {
-            Dispatcher.Invoke(() =>
-            {
-                ConsoleOutputBox.AppendText(text);
-                ConsoleOutputBox.ScrollToEnd();
-            });
-        }
-
         private void DisconnectButton_Click(object sender, RoutedEventArgs e)
         {
             Console.WriteLine("Disconnecting session...");
             _hooks?.UninstallHooks();
             _udp?.Disconnect();
-            _hooks = null; _udp = null; _isSender = false;
+            _hooks = null; _udp = null;
             SetUiEnabled(true);
         }
     }
