@@ -120,7 +120,7 @@ OmniMouse is a WPF application for Windows (.NET 8) that enables real-time shari
 
 ## License
 
-[MIT](LICENSE) (or your chosen license)
+[MIT](LICENSE) 
 
 ---
 
