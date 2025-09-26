@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.ComponentModel;
+using System.Windows;
 using System.Windows.Input;
 using System.Threading;
 using OmniMouse.Hooks;
@@ -16,6 +18,10 @@ namespace OmniMouse.ViewModel
         private string _consoleOutput = string.Empty;
         private string _hostIp = string.Empty;
         private bool _isConnected;
+
+        // internal fixed-size line buffer to avoid unbounded growth
+        private readonly List<string> _consoleLines = new();
+        private const int MaxConsoleLines = 20;
 
         // Properties
         public string ConsoleOutput 
@@ -114,7 +120,25 @@ namespace OmniMouse.ViewModel
 
         private void OnConsoleOutputReceived(string text)
         {
-            ConsoleOutput += text;
+            // Ensure UI updates happen on the UI thread and maintain only the last MaxConsoleLines lines.
+            Application.Current?.Dispatcher?.BeginInvoke(new Action(() =>
+            {
+                if (string.IsNullOrEmpty(text)) return;
+
+                // Normalize CRLF and split into lines
+                var normalized = text.Replace("\r", "");
+                var parts = normalized.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+
+                foreach (var line in parts)
+                {
+                    _consoleLines.Add(line);
+                    // trim to last N lines
+                    while (_consoleLines.Count > MaxConsoleLines)
+                        _consoleLines.RemoveAt(0);
+                }
+
+                ConsoleOutput = string.Join(Environment.NewLine, _consoleLines);
+            }));
         }
 
         private void UpdateButtonStates()
