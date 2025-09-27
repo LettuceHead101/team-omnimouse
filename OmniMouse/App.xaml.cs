@@ -18,22 +18,51 @@ namespace OmniMouse
 
         private class ConsoleRedirector : TextWriter
         {
+            private readonly StringBuilder _buffer = new();
             public override Encoding Encoding => Encoding.UTF8;
 
             public override void WriteLine(string? value)
             {
-                ConsoleOutputReceived?.Invoke((value ?? "") + Environment.NewLine);
+                if (value is null) value = string.Empty;
+                _buffer.Append(value);
+                _buffer.Append(Environment.NewLine);
+                FlushBuffer();
             }
 
             public override void Write(char value)
             {
-                ConsoleOutputReceived?.Invoke(value.ToString());
+                _buffer.Append(value);
+                if (value == '\n')
+                    FlushBuffer();
             }
 
             public override void Write(string? value)
             {
-                if (!string.IsNullOrEmpty(value))
-                    ConsoleOutputReceived?.Invoke(value);
+                if (string.IsNullOrEmpty(value))
+                    return;
+
+                int start = 0;
+                for (int i = 0; i < value.Length; i++)
+                {
+                    if (value[i] == '\n')
+                    {
+                        _buffer.Append(value.Substring(start, i - start + 1));
+                        FlushBuffer();
+                        start = i + 1;
+                    }
+                }
+                if (start < value.Length)
+                {
+                    _buffer.Append(value.Substring(start));
+                }
+            }
+
+            private void FlushBuffer()
+            {       
+                if (_buffer.Length == 0) return;
+                var s = _buffer.ToString();
+                _buffer.Clear();
+                ConsoleOutputReceived?.Invoke(s);
             }
         }
     }
