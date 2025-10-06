@@ -8,7 +8,7 @@ using OmniMouse.Core.Packets;
 namespace OmniMouse.Network
 {
     public interface IUdpMouseTransmitter
-    {
+    {// define the contract the class must fulfill
         void StartHost();
         void StartCoHost(string hostIp);
         void SendMousePosition(int x, int y);
@@ -16,18 +16,30 @@ namespace OmniMouse.Network
     }
 
     public class UdpMouseTransmitter : IUdpMouseTransmitter
-    {
-        private UdpClient? _udpClient;
+    {// implement the contract
+        private IUdpClient? _udpClient;
         private IPEndPoint? _remoteEndPoint;
         private bool _isCoHost = false;
         private string _hostIp = "";
         private const int UdpPort = 5000;
+        private readonly Func<int, IUdpClient> _udpClientFactoryWithPort;
+        private readonly Func<IUdpClient> _udpClientFactory;
+
+        public UdpMouseTransmitter() : this(() => new UdpClientAdapter(), port => new UdpClientAdapter(port))
+        {
+        }
+
+        public UdpMouseTransmitter(Func<IUdpClient> udpClientFactory, Func<int, IUdpClient> udpClientFactoryWithPort)
+        {
+            _udpClientFactory = udpClientFactory;
+            _udpClientFactoryWithPort = udpClientFactoryWithPort;
+        }
 
         public void StartHost()
         {
             try
             {
-                var client = new UdpClient(UdpPort);
+                var client = _udpClientFactoryWithPort(UdpPort);
                 // allow reuse (optional)
                 client.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
                 _udpClient = client;
@@ -47,7 +59,7 @@ namespace OmniMouse.Network
             {
                 _isCoHost = true;
                 _hostIp = hostIp;
-                _udpClient = new UdpClient(); // ephemeral local port
+                _udpClient = _udpClientFactory(); // ephemeral local port
                 _remoteEndPoint = new IPEndPoint(IPAddress.Parse(hostIp), UdpPort);
                 Console.WriteLine($"[UDP] Sending mouse positions to {_remoteEndPoint.Address}:{_remoteEndPoint.Port} via UDP...");
             }
