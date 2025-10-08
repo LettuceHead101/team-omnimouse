@@ -11,6 +11,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OmniMouse.Core", "src\OmniM
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NetworkTestProject1", "NetworkTestProject1\NetworkTestProject1.csproj", "{7497D156-B1BD-4303-B10E-8646426E5D1F}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "UiTestHarness", "UiTestHarness\UiTestHarness.csproj", "{BBAD3198-9002-4009-A1E3-19FE02F8D2F8}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -57,6 +59,18 @@ Global
 		{7497D156-B1BD-4303-B10E-8646426E5D1F}.Release|x64.Build.0 = Release|Any CPU
 		{7497D156-B1BD-4303-B10E-8646426E5D1F}.Release|x86.ActiveCfg = Release|Any CPU
 		{7497D156-B1BD-4303-B10E-8646426E5D1F}.Release|x86.Build.0 = Release|Any CPU
+		{BBAD3198-9002-4009-A1E3-19FE02F8D2F8}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{BBAD3198-9002-4009-A1E3-19FE02F8D2F8}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{BBAD3198-9002-4009-A1E3-19FE02F8D2F8}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{BBAD3198-9002-4009-A1E3-19FE02F8D2F8}.Debug|x64.Build.0 = Debug|Any CPU
+		{BBAD3198-9002-4009-A1E3-19FE02F8D2F8}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{BBAD3198-9002-4009-A1E3-19FE02F8D2F8}.Debug|x86.Build.0 = Debug|Any CPU
+		{BBAD3198-9002-4009-A1E3-19FE02F8D2F8}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{BBAD3198-9002-4009-A1E3-19FE02F8D2F8}.Release|Any CPU.Build.0 = Release|Any CPU
+		{BBAD3198-9002-4009-A1E3-19FE02F8D2F8}.Release|x64.ActiveCfg = Release|Any CPU
+		{BBAD3198-9002-4009-A1E3-19FE02F8D2F8}.Release|x64.Build.0 = Release|Any CPU
+		{BBAD3198-9002-4009-A1E3-19FE02F8D2F8}.Release|x86.ActiveCfg = Release|Any CPU
+		{BBAD3198-9002-4009-A1E3-19FE02F8D2F8}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

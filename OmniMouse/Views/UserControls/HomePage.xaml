@@ -14,7 +14,6 @@
         <viewModel:HomePageViewModel />
     </UserControl.DataContext>
 
-    <!--  UI styling with dark theme -->
     <UserControl.Resources>
         <SolidColorBrush x:Key="Bg" Color="#111315"/>
         <SolidColorBrush x:Key="Card" Color="#1E1F22"/>
@@ -121,13 +120,15 @@
                 <Border x:Name="ModeBadge"
                         Margin="12,0,0,0"
                         VerticalAlignment="Center"
-                        Style="{StaticResource ModeBadgeStyle}">
+                        Style="{StaticResource ModeBadgeStyle}"
+                        AutomationProperties.AutomationId="ModeBadge">
                     <TextBlock Style="{StaticResource StatusTextStyle}"/>
                 </Border>
 
                 <!-- Status Dot -->
                 <Ellipse x:Name="StatusDot" Width="12" Height="12" Margin="6,0,0,0"
-                         Style="{StaticResource StatusDotStyle}"/>
+                         Style="{StaticResource StatusDotStyle}"
+                         AutomationProperties.AutomationId="StatusDot"/>
             </StackPanel>
         </Border>
 
@@ -141,20 +142,24 @@
                 <StackPanel Orientation="Horizontal" Grid.Column="0">
                     <Button x:Name="HostButton" Content="Host" 
                             Command="{Binding HostCommand}" 
-                            IsEnabled="{Binding CanConnect}"/>
+                            IsEnabled="{Binding CanConnect}"
+                            AutomationProperties.AutomationId="HostButton"/>
                     <Button x:Name="CohostButton" Content="Cohost" 
                             Command="{Binding CohostCommand}" 
-                            IsEnabled="{Binding CanConnect}"/>
+                            IsEnabled="{Binding CanConnect}"
+                            AutomationProperties.AutomationId="CohostButton"/>
                     <Button x:Name="DisconnectButton" Content="Disconnect" 
                             Command="{Binding DisconnectCommand}" 
-                            IsEnabled="{Binding CanDisconnect}"/>
+                            IsEnabled="{Binding CanDisconnect}"
+                            AutomationProperties.AutomationId="DisconnectButton"/>
                 </StackPanel>
 
                 <Border Grid.Column="1" CornerRadius="12" Background="#101113" Padding="8" Margin="12,0,0,0">
                     <DockPanel LastChildFill="True">
                         <TextBlock Text="Host IP:" Foreground="{StaticResource Dim}" VerticalAlignment="Center" Margin="0,0,8,0"/>
                         <TextBox x:Name="HostIpBox" VerticalAlignment="Center" 
-                                 Text="{Binding HostIp, UpdateSourceTrigger=PropertyChanged}"/>
+                                 Text="{Binding HostIp, UpdateSourceTrigger=PropertyChanged}"
+                                 AutomationProperties.AutomationId="HostIpBox"/>
                     </DockPanel>
                 </Border>
             </Grid>
@@ -175,7 +180,8 @@
                      IsReadOnly="True"
                      Text="{Binding ConsoleOutput, Mode=OneWay}"
                      VerticalScrollBarVisibility="Auto"
-                     HorizontalScrollBarVisibility="Auto"/>
+                     HorizontalScrollBarVisibility="Auto"
+                     AutomationProperties.AutomationId="ConsoleOutputBox"/>
         </Border>
 
         <Border Grid.Row="4" Style="{StaticResource PillBorder}" CornerRadius="14" Padding="8" Margin="0,12,0,0">
