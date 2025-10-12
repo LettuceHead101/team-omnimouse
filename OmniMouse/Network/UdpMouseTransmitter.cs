@@ -9,7 +9,7 @@ namespace OmniMouse.Network
     {
         private IUdpClient? _udpClient;
         private IPEndPoint? _remoteEndPoint;
-        private bool _isCoHost = false;
+        private bool _isCoHost = false; // true = this instance is a sender (cohost in your naming)
         private string _hostIp = "";
         private const int UdpPort = 5000;
         private readonly Func<int, IUdpClient> _udpClientFactoryWithPort;
@@ -38,7 +38,10 @@ namespace OmniMouse.Network
             _isCoHost = true;
             _hostIp = hostIp;
             _remoteEndPoint = new IPEndPoint(IPAddress.Parse(hostIp), UdpPort);
-            _udpClient = _udpClientFactory(); // local socket for client sends
+
+            // Create and bind a socket so Receive can be used.
+            _udpClient = _udpClientFactoryWithPort(0); // use factory to bind an ephemeral local port
+            Console.WriteLine($"[UDP] CoHost sender using local port {_udpClient.Client.LocalEndPoint} -> sending to {_remoteEndPoint.Address}:{_remoteEndPoint.Port}");
             StartReceiveLoop();
         }
 
@@ -68,11 +71,22 @@ namespace OmniMouse.Network
         public void SendNormalizedMousePosition(float normalizedX, float normalizedY)
         {
             if (_udpClient == null || !_isCoHost || _remoteEndPoint == null) return;
+
+            // Log what we're about to send so you can verify sender values
+            Console.WriteLine($"[UDP][SendNormalized] -> nx={normalizedX:F6}, ny={normalizedY:F6} to {_remoteEndPoint.Address}:{_remoteEndPoint.Port}");
+
             var buf = new byte[1 + 4 + 4];
             buf[0] = 0x01;
             Array.Copy(BitConverter.GetBytes(normalizedX), 0, buf, 1, 4);
             Array.Copy(BitConverter.GetBytes(normalizedY), 0, buf, 1 + 4, 4);
-            _udpClient.Send(buf, buf.Length, _remoteEndPoint);
+            try
+            {
+                _udpClient.Send(buf, buf.Length, _remoteEndPoint);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[UDP][SendNormalized] Send error: {ex.Message}");
+            }
         }
 
         public void Disconnect()
@@ -101,47 +115,61 @@ namespace OmniMouse.Network
                 {
                     var data = _udpClient.Receive(ref remoteEP);
                     if (data == null || data.Length == 0) continue;
+
                     if (data[0] == 0x01 && data.Length >= 1 + 8)
                     {
                         var nx = BitConverter.ToSingle(data, 1);
                         var ny = BitConverter.ToSingle(data, 1 + 4);
+
+                        // Log receiver virtual bounds and values
+                        CoordinateNormalizer.GetVirtualScreenBounds(out var left, out var top, out var width, out var height);
+                        Console.WriteLine($"[UDP][RecvNormalized] from {remoteEP.Address}:{remoteEP.Port} nx={nx:F6}, ny={ny:F6} virtualBounds=[{left},{top},{width},{height}]");
+
                         CoordinateNormalizer.NormalizedToScreen(nx, ny, out var sx, out var sy);
+                        Console.WriteLine($"[UDP][RecvNormalized] mapped -> ({sx},{sy})");
                         SetCursorPos(sx, sy);
                     }
                     else if (data[0] == 0x02 && data.Length >= 1 + 8)
                     {
                         var x = BitConverter.ToInt32(data, 1);
                         var y = BitConverter.ToInt32(data, 1 + 4);
+                        Console.WriteLine($"[UDP][RecvLegacy] from {remoteEP.Address}:{remoteEP.Port} -> ({x},{y})");
                         SetCursorPos(x, y);
                     }
                     else
                     {
-                        // try fallback: if message is exactly 8 bytes, maybe it's two ints or two floats without header.
                         if (data.Length == 8)
                         {
-                            // try floats first
                             var nx = BitConverter.ToSingle(data, 0);
                             var ny = BitConverter.ToSingle(data, 4);
-                            // If values in 0..1, treat as normalized
                             if (nx >= 0f && nx <= 1f && ny >= 0f && ny <= 1f)
                             {
                                 CoordinateNormalizer.NormalizedToScreen(nx, ny, out var sx, out var sy);
+                                Console.WriteLine($"[UDP][RecvFallbackFloat] nx={nx:F6}, ny={ny:F6} -> ({sx},{sy})");
                                 SetCursorPos(sx, sy);
                             }
                             else
                             {
-                                // treat as two ints
                                 var ix = BitConverter.ToInt32(data, 0);
                                 var iy = BitConverter.ToInt32(data, 4);
+                                Console.WriteLine($"[UDP][RecvFallbackInt] -> ({ix},{iy})");
                                 SetCursorPos(ix, iy);
                             }
+                        }
+                        else
+                        {
+                            Console.WriteLine($"[UDP][Receive] Unknown packet length {data.Length} from {remoteEP.Address}:{remoteEP.Port}");
                         }
                     }
                 }
                 catch (ThreadAbortException) { break; }
-                catch (Exception) { Thread.Sleep(1); /* ignore transient errors */ }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[UDP][Receive] Exception: {ex.Message}");
+                    Thread.Sleep(1); // avoid busy loop
+                }
             }
-        }
+        } 
 
         [DllImport("user32.dll")]
         private static extern bool SetCursorPos(int X, int Y);
