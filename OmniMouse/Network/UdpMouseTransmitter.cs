@@ -1,147 +1,177 @@
 using System;
 using System.Net;
-using System.Net.Sockets;
 using System.Threading;
-using MessagePack;
-using OmniMouse.Core.Packets;
+using System.Runtime.InteropServices;
 
 namespace OmniMouse.Network
 {
-    public interface IUdpMouseTransmitter
-    {// define the contract the class must fulfill
-        void StartHost();
-        void StartCoHost(string hostIp);
-        void SendMousePosition(int x, int y);
-        void Disconnect();
-    }
-
     public class UdpMouseTransmitter : IUdpMouseTransmitter
-    {// implement the contract
+    {
         private IUdpClient? _udpClient;
         private IPEndPoint? _remoteEndPoint;
-        private bool _isCoHost = false;
+        private bool _isCoHost = false; // true = this instance is a sender (cohost in your naming)
         private string _hostIp = "";
         private const int UdpPort = 5000;
         private readonly Func<int, IUdpClient> _udpClientFactoryWithPort;
         private readonly Func<IUdpClient> _udpClientFactory;
+        private Thread? _recvThread;
+        private volatile bool _running;
 
-        public UdpMouseTransmitter() : this(() => new UdpClientAdapter(), port => new UdpClientAdapter(port))
-        {
-        }
+        public UdpMouseTransmitter() : this(() => new UdpClientAdapter(), port => new UdpClientAdapter(port)) { }
 
         public UdpMouseTransmitter(Func<IUdpClient> udpClientFactory, Func<int, IUdpClient> udpClientFactoryWithPort)
         {
-            _udpClientFactory = udpClientFactory;
-            _udpClientFactoryWithPort = udpClientFactoryWithPort;
+            _udpClientFactory = udpClientFactory ?? throw new ArgumentNullException(nameof(udpClientFactory));
+            _udpClientFactoryWithPort = udpClientFactoryWithPort ?? throw new ArgumentNullException(nameof(udpClientFactoryWithPort));
         }
 
         public void StartHost()
         {
-            try
-            {
-                var client = _udpClientFactoryWithPort(UdpPort);
-                // allow reuse (optional)
-                client.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
-                _udpClient = client;
-                Console.WriteLine($"[UDP] Listening for UDP packets on port {UdpPort}...");
-                new Thread(ReceiveMouseLoopUDP) { IsBackground = true }.Start();
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[UDP][StartHost] Failed to start listener: {ex.Message}");
-                throw;
-            }
+            _isCoHost = false;
+            // bind receiver to port
+            _udpClient = _udpClientFactoryWithPort(UdpPort);
+            StartReceiveLoop();
         }
 
         public void StartCoHost(string hostIp)
         {
-            try
+            _isCoHost = true;
+            _hostIp = hostIp;
+            _remoteEndPoint = new IPEndPoint(IPAddress.Parse(hostIp), UdpPort);
+
+            // Create and bind a socket so Receive can be used.
+            _udpClient = _udpClientFactoryWithPort(0); // use factory to bind an ephemeral local port
+            Console.WriteLine($"[UDP] CoHost sender using local port {_udpClient.Client.LocalEndPoint} -> sending to {_remoteEndPoint.Address}:{_remoteEndPoint.Port}");
+            StartReceiveLoop();
+        }
+
+        private void StartReceiveLoop()
+        {
+            _running = true;
+            _recvThread = new Thread(ReceiveMouseLoopUDP) { IsBackground = true };
+            _recvThread.Start();
+        }
+
+        // Send raw pixel ints (legacy)
+        public void SendMousePosition(int x, int y)
+        {
+            if (_udpClient == null) return;
+            if (_isCoHost && _remoteEndPoint != null)
             {
-                _isCoHost = true;
-                _hostIp = hostIp;
-                _udpClient = _udpClientFactory(); // ephemeral local port
-                _remoteEndPoint = new IPEndPoint(IPAddress.Parse(hostIp), UdpPort);
-                Console.WriteLine($"[UDP] Sending mouse positions to {_remoteEndPoint.Address}:{_remoteEndPoint.Port} via UDP...");
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[UDP][StartCoHost] Failed to configure sender: {ex.Message}");
-                throw;
+                // simple legacy format: prefix 0x02, then two 4-byte ints
+                var buf = new byte[1 + 8];
+                buf[0] = 0x02;
+                Array.Copy(BitConverter.GetBytes(x), 0, buf, 1, 4);
+                Array.Copy(BitConverter.GetBytes(y), 0, buf, 1 + 4, 4);
+                _udpClient.Send(buf, buf.Length, _remoteEndPoint);
             }
         }
 
-        public void SendMousePosition(int x, int y)
+        // NEW: send two normalized floats (0..1). Message type 0x01 then 8 bytes of floats.
+        public void SendNormalizedMousePosition(float normalizedX, float normalizedY)
         {
-            if (_isCoHost && _udpClient != null && _remoteEndPoint != null)
+            if (_udpClient == null || !_isCoHost || _remoteEndPoint == null) return;
+
+            // Log what we're about to send so you can verify sender values
+            Console.WriteLine($"[UDP][SendNormalized] -> nx={normalizedX:F6}, ny={normalizedY:F6} to {_remoteEndPoint.Address}:{_remoteEndPoint.Port}");
+
+            var buf = new byte[1 + 4 + 4];
+            buf[0] = 0x01;
+            Array.Copy(BitConverter.GetBytes(normalizedX), 0, buf, 1, 4);
+            Array.Copy(BitConverter.GetBytes(normalizedY), 0, buf, 1 + 4, 4);
+            try
             {
-                try
-                {
-                    var packet = new MousePacket { X = x, Y = y };
-                    var msg = MessagePackSerializer.Serialize(packet);
-                    int sent = _udpClient.Send(msg, msg.Length, _remoteEndPoint);
-                    Console.WriteLine($"[UDP][Send] Sent {sent} bytes to {_remoteEndPoint.Address}:{_remoteEndPoint.Port} -> ({x},{y})");
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"[UDP][Send] Error sending packet: {ex.Message}");
-                }
+                _udpClient.Send(buf, buf.Length, _remoteEndPoint);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[UDP][SendNormalized] Send error: {ex.Message}");
             }
         }
 
         public void Disconnect()
         {
+            _running = false;
             try
             {
                 _udpClient?.Close();
-                _udpClient = null;
-                _remoteEndPoint = null;
-                _isCoHost = false;
-                _hostIp = "";
-                Console.WriteLine("[UDP] Disconnected.");
             }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[UDP][Disconnect] Error: {ex.Message}");
-            }
+            catch { }
+            _udpClient?.Dispose();
+            _udpClient = null;
         }
 
+        // This loop receives messages and dispatches to SetCursorPos.
+        // Protocol:
+        // 0x01 | float32 nx | float32 ny  => normalized coords
+        // 0x02 | int32  x | int32  y     => legacy raw pixels
         private void ReceiveMouseLoopUDP()
         {
-            var ep = new IPEndPoint(IPAddress.Any, UdpPort);
-            while (true)
+            if (_udpClient == null) return;
+            var remoteEP = new IPEndPoint(IPAddress.Any, 0);
+            while (_running)
             {
                 try
                 {
-                    if (_udpClient != null)
+                    var data = _udpClient.Receive(ref remoteEP);
+                    if (data == null || data.Length == 0) continue;
+
+                    if (data[0] == 0x01 && data.Length >= 1 + 8)
                     {
-                        var data = _udpClient.Receive(ref ep);
-                        Console.WriteLine($"[UDP][Receive] Received {data.Length} bytes from {ep.Address}:{ep.Port}");
-                        try
+                        var nx = BitConverter.ToSingle(data, 1);
+                        var ny = BitConverter.ToSingle(data, 1 + 4);
+
+                        // Log receiver virtual bounds and values
+                        CoordinateNormalizer.GetVirtualScreenBounds(out var left, out var top, out var width, out var height);
+                        Console.WriteLine($"[UDP][RecvNormalized] from {remoteEP.Address}:{remoteEP.Port} nx={nx:F6}, ny={ny:F6} virtualBounds=[{left},{top},{width},{height}]");
+
+                        CoordinateNormalizer.NormalizedToScreen(nx, ny, out var sx, out var sy);
+                        Console.WriteLine($"[UDP][RecvNormalized] mapped -> ({sx},{sy})");
+                        SetCursorPos(sx, sy);
+                    }
+                    else if (data[0] == 0x02 && data.Length >= 1 + 8)
+                    {
+                        var x = BitConverter.ToInt32(data, 1);
+                        var y = BitConverter.ToInt32(data, 1 + 4);
+                        Console.WriteLine($"[UDP][RecvLegacy] from {remoteEP.Address}:{remoteEP.Port} -> ({x},{y})");
+                        SetCursorPos(x, y);
+                    }
+                    else
+                    {
+                        if (data.Length == 8)
                         {
-                            var packet = MessagePackSerializer.Deserialize<MousePacket>(data);
-                            Console.WriteLine($"[UDP][Receive] Moving cursor to ({packet.X},{packet.Y})");
-                            SetCursorPos(packet.X, packet.Y);
+                            var nx = BitConverter.ToSingle(data, 0);
+                            var ny = BitConverter.ToSingle(data, 4);
+                            if (nx >= 0f && nx <= 1f && ny >= 0f && ny <= 1f)
+                            {
+                                CoordinateNormalizer.NormalizedToScreen(nx, ny, out var sx, out var sy);
+                                Console.WriteLine($"[UDP][RecvFallbackFloat] nx={nx:F6}, ny={ny:F6} -> ({sx},{sy})");
+                                SetCursorPos(sx, sy);
+                            }
+                            else
+                            {
+                                var ix = BitConverter.ToInt32(data, 0);
+                                var iy = BitConverter.ToInt32(data, 4);
+                                Console.WriteLine($"[UDP][RecvFallbackInt] -> ({ix},{iy})");
+                                SetCursorPos(ix, iy);
+                            }
                         }
-                        catch (Exception exInner)
+                        else
                         {
-                            Console.WriteLine($"[UDP][Receive] Failed to deserialize or apply packet: {exInner.Message}");
+                            Console.WriteLine($"[UDP][Receive] Unknown packet length {data.Length} from {remoteEP.Address}:{remoteEP.Port}");
                         }
                     }
                 }
-                catch (SocketException sockEx)
-                {
-                    Console.WriteLine($"[UDP][Receive] SocketException: {sockEx.Message}");
-                    Thread.Sleep(100);
-                }
+                catch (ThreadAbortException) { break; }
                 catch (Exception ex)
                 {
                     Console.WriteLine($"[UDP][Receive] Exception: {ex.Message}");
-                    Thread.Sleep(100);
+                    Thread.Sleep(1); // avoid busy loop
                 }
             }
-        }
+        } 
 
-        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        [DllImport("user32.dll")]
         private static extern bool SetCursorPos(int X, int Y);
     }
 }

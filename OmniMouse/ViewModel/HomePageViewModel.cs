@@ -58,7 +58,7 @@ namespace OmniMouse.ViewModel
             CohostCommand = new RelayCommand(ExecuteCohost, CanExecuteConnect);
             DisconnectCommand = new RelayCommand(ExecuteDisconnect, CanExecuteDisconnect);
 
-            // subscribe to console output
+            // subscribe to console output feed from App so we can show logs in UI
             App.ConsoleOutputReceived += OnConsoleOutputReceived;
         }
 

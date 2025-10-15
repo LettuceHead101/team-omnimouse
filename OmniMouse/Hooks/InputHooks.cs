@@ -163,9 +163,29 @@ namespace OmniMouse.Hooks
                 switch ((int)wParam)
                 {
                     case WM_MOUSEMOVE:
+                        // Existing behavior logged raw mouse coords for debugging.
                         Console.WriteLine($"[MOVE] ({ms.pt.x}, {ms.pt.y})");
+
                         if (_instance != null)
-                            _instance._udpTransmitter.SendMousePosition(ms.pt.x, ms.pt.y);
+                        {
+                            try
+                            {
+                                // IMPORTANT CHANGE:
+                                // - We no longer send raw pixel ints here.
+                                // - Instead we normalize the raw screen coordinates (ms.pt) to [0..1]
+                                //   relative to the sender's virtual desktop, then send those floats.
+                                // - The receiver maps those normalized values to its own virtual desktop.
+                                //
+                                // This change is the main fix for resolution/aspect-ratio parity issues.
+                                CoordinateNormalizer.ScreenToNormalized(ms.pt.x, ms.pt.y, out var nx, out var ny);
+                                _instance._udpTransmitter?.SendNormalizedMousePosition(nx, ny);
+                            }
+                            catch (Exception ex)
+                            {
+                                // Hooks must be robust; swallow exceptions and log so hooks don't crash the process.
+                                Console.WriteLine($"[HOOK] Failed to send normalized mouse position: {ex.Message}");
+                            }
+                        }
                         break;
                     case WM_LBUTTONDOWN:
                         Console.WriteLine($"[LBTN] ({ms.pt.x}, {ms.pt.y})");
