@@ -2,6 +2,7 @@ using System;
 using System.Net;
 using System.Threading;
 using System.Runtime.InteropServices;
+using OmniMouse.Hooks; // for feedback-loop suppression
 
 namespace OmniMouse.Network
 {
@@ -9,7 +10,7 @@ namespace OmniMouse.Network
     {
         private IUdpClient? _udpClient;
         private IPEndPoint? _remoteEndPoint;
-        private bool _isCoHost = false; // true = this instance is a sender (cohost in your naming)
+        private bool _isCoHost = false;
         private string _hostIp = "";
         private const int UdpPort = 5000;
         private readonly Func<int, IUdpClient> _udpClientFactoryWithPort;
@@ -28,8 +29,8 @@ namespace OmniMouse.Network
         public void StartHost()
         {
             _isCoHost = false;
-            // bind receiver to port
             _udpClient = _udpClientFactoryWithPort(UdpPort);
+            Console.WriteLine($"[UDP] Host listening on {UdpPort}.");
             StartReceiveLoop();
         }
 
@@ -38,15 +39,26 @@ namespace OmniMouse.Network
             _isCoHost = true;
             _hostIp = hostIp;
             _remoteEndPoint = new IPEndPoint(IPAddress.Parse(hostIp), UdpPort);
-
-            // Create and bind a socket so Receive can be used.
-            _udpClient = _udpClientFactoryWithPort(0); // use factory to bind an ephemeral local port
+            _udpClient = _udpClientFactoryWithPort(0);
             Console.WriteLine($"[UDP] CoHost sender using local port {_udpClient.Client.LocalEndPoint} -> sending to {_remoteEndPoint.Address}:{_remoteEndPoint.Port}");
+            StartReceiveLoop();
+        }
+
+        // Symmetric mode: bind to UdpPort and send to peerIp:UdpPort
+        public void StartPeer(string peerIp)
+        {
+            _isCoHost = true; // indicates we will send
+            _hostIp = peerIp;
+            _remoteEndPoint = new IPEndPoint(IPAddress.Parse(peerIp), UdpPort);
+
+            _udpClient = _udpClientFactoryWithPort(UdpPort); // bind to well-known port for receiving
+            Console.WriteLine($"[UDP] Peer mode bound to {UdpPort}, remote {_remoteEndPoint.Address}:{_remoteEndPoint.Port}");
             StartReceiveLoop();
         }
 
         private void StartReceiveLoop()
         {
+            if (_running) return;
             _running = true;
             _recvThread = new Thread(ReceiveMouseLoopUDP) { IsBackground = true };
             _recvThread.Start();
@@ -56,7 +68,7 @@ namespace OmniMouse.Network
         public void SendMousePosition(int x, int y)
         {
             if (_udpClient == null) return;
-            if (_isCoHost && _remoteEndPoint != null)
+            if (_remoteEndPoint != null)
             {
                 // simple legacy format: prefix 0x02, then two 4-byte ints
                 var buf = new byte[1 + 8];
@@ -70,7 +82,7 @@ namespace OmniMouse.Network
         // NEW: send two normalized floats (0..1). Message type 0x01 then 8 bytes of floats.
         public void SendNormalizedMousePosition(float normalizedX, float normalizedY)
         {
-            if (_udpClient == null || !_isCoHost || _remoteEndPoint == null) return;
+            if (_udpClient == null || _remoteEndPoint == null) return;
 
             // Log what we're about to send so you can verify sender values
             Console.WriteLine($"[UDP][SendNormalized] -> nx={normalizedX:F6}, ny={normalizedY:F6} to {_remoteEndPoint.Address}:{_remoteEndPoint.Port}");
@@ -92,13 +104,21 @@ namespace OmniMouse.Network
         public void Disconnect()
         {
             _running = false;
+            try { _udpClient?.Close(); } catch { }
+            try { _udpClient?.Dispose(); } catch { }
+            _udpClient = null;
+
             try
             {
-                _udpClient?.Close();
+                if (_recvThread != null && _recvThread.IsAlive)
+                {
+                    if (!_recvThread.Join(500))
+                    {
+                        // let the background thread exit naturally; it checks _running
+                    }
+                }
             }
             catch { }
-            _udpClient?.Dispose();
-            _udpClient = null;
         }
 
         // This loop receives messages and dispatches to SetCursorPos.
@@ -127,6 +147,9 @@ namespace OmniMouse.Network
 
                         CoordinateNormalizer.NormalizedToScreen(nx, ny, out var sx, out var sy);
                         Console.WriteLine($"[UDP][RecvNormalized] mapped -> ({sx},{sy})");
+
+                        // Prevent feedback loop: suppress the very next local move from this exact position
+                        InputHooks.SuppressNextMoveFrom(sx, sy);
                         SetCursorPos(sx, sy);
                     }
                     else if (data[0] == 0x02 && data.Length >= 1 + 8)
@@ -134,6 +157,7 @@ namespace OmniMouse.Network
                         var x = BitConverter.ToInt32(data, 1);
                         var y = BitConverter.ToInt32(data, 1 + 4);
                         Console.WriteLine($"[UDP][RecvLegacy] from {remoteEP.Address}:{remoteEP.Port} -> ({x},{y})");
+                        InputHooks.SuppressNextMoveFrom(x, y);
                         SetCursorPos(x, y);
                     }
                     else
@@ -146,6 +170,7 @@ namespace OmniMouse.Network
                             {
                                 CoordinateNormalizer.NormalizedToScreen(nx, ny, out var sx, out var sy);
                                 Console.WriteLine($"[UDP][RecvFallbackFloat] nx={nx:F6}, ny={ny:F6} -> ({sx},{sy})");
+                                InputHooks.SuppressNextMoveFrom(sx, sy);
                                 SetCursorPos(sx, sy);
                             }
                             else
@@ -153,6 +178,7 @@ namespace OmniMouse.Network
                                 var ix = BitConverter.ToInt32(data, 0);
                                 var iy = BitConverter.ToInt32(data, 4);
                                 Console.WriteLine($"[UDP][RecvFallbackInt] -> ({ix},{iy})");
+                                InputHooks.SuppressNextMoveFrom(ix, iy);
                                 SetCursorPos(ix, iy);
                             }
                         }
@@ -165,6 +191,7 @@ namespace OmniMouse.Network
                 catch (ThreadAbortException) { break; }
                 catch (Exception ex)
                 {
+                    if (!_running) break;
                     Console.WriteLine($"[UDP][Receive] Exception: {ex.Message}");
                     Thread.Sleep(1); // avoid busy loop
                 }

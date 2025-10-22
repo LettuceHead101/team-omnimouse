@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.ComponentModel;
 using System.Windows;
 using System.Windows.Input;
 using System.Threading;
@@ -14,16 +13,13 @@ namespace OmniMouse.ViewModel
     {
         private InputHooks? _hooks;
         private UdpMouseTransmitter? _udp;
-        private bool _isSender;
         private string _consoleOutput = string.Empty;
         private string _hostIp = string.Empty;
         private bool _isConnected;
 
-        // internal fixed-size line buffer to avoid unbounded growth
         private readonly List<string> _consoleLines = new();
         private const int MaxConsoleLines = 20;
 
-        // Properties
         public string ConsoleOutput 
         { 
             get => _consoleOutput;
@@ -42,49 +38,32 @@ namespace OmniMouse.ViewModel
             set => SetProperty(ref _isConnected, value, UpdateButtonStates);
         }
 
-        // Button State Properties
         public bool CanConnect => !IsConnected;
         public bool CanDisconnect => IsConnected;
 
-        // Commands
-        public ICommand HostCommand { get; }
-        public ICommand CohostCommand { get; }
+        public ICommand ConnectCommand { get; }
         public ICommand DisconnectCommand { get; }
 
         public HomePageViewModel()
         {
-            // Initialize commands
-            HostCommand = new RelayCommand(ExecuteHost, CanExecuteHost);
-            CohostCommand = new RelayCommand(ExecuteCohost, CanExecuteConnect);
+            ConnectCommand = new RelayCommand(ExecuteConnect, CanExecuteConnect);
             DisconnectCommand = new RelayCommand(ExecuteDisconnect, CanExecuteDisconnect);
 
-            // subscribe to console output feed from App so we can show logs in UI
             App.ConsoleOutputReceived += OnConsoleOutputReceived;
         }
 
-        // Command execution methods
-        private void ExecuteHost(object? parameter)
+        private void ExecuteConnect(object? parameter)
         {
             if (string.IsNullOrWhiteSpace(HostIp))
             {
-                WriteToConsole("Enter the Cohost's IP before starting Host mode.");
+                WriteToConsole("Enter the peer's IP before connecting.");
                 return;
             }
 
-            WriteToConsole($"Starting Host (sender). Sending to {HostIp}...");
+            WriteToConsole($"Connecting to peer at {HostIp} (bidirectional)...");
             _udp = new UdpMouseTransmitter();
-            _udp.StartCoHost(HostIp);
+            _udp.StartPeer(HostIp);
             StartHooks(_udp);
-            _isSender = true;
-            IsConnected = true;
-        }
-
-        private void ExecuteCohost(object? parameter)
-        {
-            WriteToConsole("Starting Cohost (receiver). Listening...");
-            _udp = new UdpMouseTransmitter();
-            _udp.StartHost();
-            _isSender = false;
             IsConnected = true;
         }
 
@@ -95,16 +74,12 @@ namespace OmniMouse.ViewModel
             _udp?.Disconnect();
             _hooks = null;
             _udp = null;
-            _isSender = false;
             IsConnected = false;
         }
 
-        // Command can-execute methods
-        private bool CanExecuteHost(object? parameter) => !IsConnected;
         private bool CanExecuteConnect(object? parameter) => !IsConnected;
         private bool CanExecuteDisconnect(object? parameter) => IsConnected;
 
-        // Helper methods
         private void StartHooks(UdpMouseTransmitter udp)
         {
             _hooks = new InputHooks(udp);
@@ -120,19 +95,16 @@ namespace OmniMouse.ViewModel
 
         private void OnConsoleOutputReceived(string text)
         {
-            // Ensure UI updates happen on the UI thread and maintain only the last MaxConsoleLines lines.
             Application.Current?.Dispatcher?.BeginInvoke(new Action(() =>
             {
                 if (string.IsNullOrEmpty(text)) return;
 
-                // Normalize CRLF and split into lines
                 var normalized = text.Replace("\r", "");
                 var parts = normalized.Split('\n', StringSplitOptions.RemoveEmptyEntries);
 
                 foreach (var line in parts)
                 {
                     _consoleLines.Add(line);
-                    // trim to last N lines
                     while (_consoleLines.Count > MaxConsoleLines)
                         _consoleLines.RemoveAt(0);
                 }
@@ -143,29 +115,26 @@ namespace OmniMouse.ViewModel
 
         private void UpdateButtonStates()
         {
-            // Force command CanExecute to be re-evaluated
             CommandManager.InvalidateRequerySuggested();
             OnPropertyChanged(nameof(CanConnect));
             OnPropertyChanged(nameof(CanDisconnect));
         }
 
-        // Cleanup
         public void Cleanup()
         {
             App.ConsoleOutputReceived -= OnConsoleOutputReceived;
-            if (_isSender) _hooks?.UninstallHooks();
+            _hooks?.UninstallHooks();
             _udp?.Disconnect();
             _hooks = null;
             _udp = null;
         }
     }
 
-    // Simple ICommand implementation
     public sealed class RelayCommand : ICommand
     {
         private static readonly Predicate<object?> s_true = _ => true;
         private readonly Action<object?> _execute;
-        private readonly Predicate<object?> _canExecute; // non-null
+        private readonly Predicate<object?> _canExecute;
 
         public RelayCommand(Action<object?> execute)
             : this(execute, s_true) { }
@@ -173,7 +142,7 @@ namespace OmniMouse.ViewModel
         public RelayCommand(Action<object?> execute, Predicate<object?>? canExecute)
         {
             _execute = execute ?? throw new ArgumentNullException(nameof(execute));
-            _canExecute = canExecute ?? s_true; // always set
+            _canExecute = canExecute ?? s_true;
         }
 
         public bool CanExecute(object? parameter) => _canExecute(parameter);
@@ -185,5 +154,4 @@ namespace OmniMouse.ViewModel
             remove { CommandManager.RequerySuggested -= value; }
         }
     }
-
 }

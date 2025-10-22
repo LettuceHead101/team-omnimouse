@@ -24,14 +24,12 @@
         <SolidColorBrush x:Key="Err" Color="#EF4444"/>
         <SolidColorBrush x:Key="Success" Color="#10B981"/>
 
-        <!-- Pill style setters-->
         <Style x:Key="PillBorder" TargetType="Border">
             <Setter Property="CornerRadius" Value="16"/>
             <Setter Property="Background" Value="{StaticResource Card}"/>
             <Setter Property="Padding" Value="10"/>
         </Style>
 
-        <!-- Button style setters-->
         <Style TargetType="Button">
             <Setter Property="Foreground" Value="{StaticResource Ink}"/>
             <Setter Property="Background" Value="#25272C"/>
@@ -50,7 +48,6 @@
             </Setter>
         </Style>
 
-        <!-- Text box style setters-->
         <Style TargetType="TextBox">
             <Setter Property="Foreground" Value="{StaticResource Ink}"/>
             <Setter Property="Background" Value="#101113"/>
@@ -58,14 +55,12 @@
             <Setter Property="Padding" Value="10,8"/>
         </Style>
 
-        <!-- Badge base style-->
         <Style x:Key="Badge" TargetType="Border">
             <Setter Property="CornerRadius" Value="8"/>
             <Setter Property="Padding" Value="8,2"/>
             <Setter Property="HorizontalAlignment" Value="Left"/>
         </Style>
 
-        <!-- Badge with IsConnected trigger -->
         <Style x:Key="ModeBadgeStyle" TargetType="Border" BasedOn="{StaticResource Badge}">
             <Setter Property="Background" Value="{StaticResource Warn}"/>
             <Style.Triggers>
@@ -75,7 +70,6 @@
             </Style.Triggers>
         </Style>
 
-        <!-- Status text: Idle/Connected -->
         <Style x:Key="StatusTextStyle" TargetType="TextBlock">
             <Setter Property="Text" Value="Idle"/>
             <Setter Property="Foreground" Value="White"/>
@@ -88,7 +82,6 @@
             </Style.Triggers>
         </Style>
 
-        <!-- Status dot: red/green -->
         <Style x:Key="StatusDotStyle" TargetType="Ellipse">
             <Setter Property="Fill" Value="{StaticResource Err}"/>
             <Style.Triggers>
@@ -99,24 +92,18 @@
         </Style>
     </UserControl.Resources>
 
-    <!-- Grid Layout here more flexible than just dockpanel -->
     <Grid Margin="16">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
-            <!--Header-->
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <!-- Header here -->
         <Border Grid.Row="0" Style="{StaticResource PillBorder}" CornerRadius="24" Padding="14" Margin="0,0,0,12">
-            <!-- Stack panel here -->
             <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                 <TextBlock Text="OmniMouse" Foreground="{StaticResource Ink}" FontSize="20" FontWeight="Bold" VerticalAlignment="Center"/>
-
-                <!-- Mode Badge -->
                 <Border x:Name="ModeBadge"
                         Margin="12,0,0,0"
                         VerticalAlignment="Center"
@@ -124,8 +111,6 @@
                         AutomationProperties.AutomationId="ModeBadge">
                     <TextBlock Style="{StaticResource StatusTextStyle}"/>
                 </Border>
-
-                <!-- Status Dot -->
                 <Ellipse x:Name="StatusDot" Width="12" Height="12" Margin="6,0,0,0"
                          Style="{StaticResource StatusDotStyle}"
                          AutomationProperties.AutomationId="StatusDot"/>
@@ -140,14 +125,10 @@
                 </Grid.ColumnDefinitions>
 
                 <StackPanel Orientation="Horizontal" Grid.Column="0">
-                    <Button x:Name="HostButton" Content="Host" 
-                            Command="{Binding HostCommand}" 
+                    <Button x:Name="ConnectButton" Content="Connect"
+                            Command="{Binding ConnectCommand}"
                             IsEnabled="{Binding CanConnect}"
-                            AutomationProperties.AutomationId="HostButton"/>
-                    <Button x:Name="CohostButton" Content="Cohost" 
-                            Command="{Binding CohostCommand}" 
-                            IsEnabled="{Binding CanConnect}"
-                            AutomationProperties.AutomationId="CohostButton"/>
+                            AutomationProperties.AutomationId="ConnectButton"/>
                     <Button x:Name="DisconnectButton" Content="Disconnect" 
                             Command="{Binding DisconnectCommand}" 
                             IsEnabled="{Binding CanDisconnect}"
@@ -156,7 +137,7 @@
 
                 <Border Grid.Column="1" CornerRadius="12" Background="#101113" Padding="8" Margin="12,0,0,0">
                     <DockPanel LastChildFill="True">
-                        <TextBlock Text="Host IP:" Foreground="{StaticResource Dim}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                        <TextBlock Text="Peer IP:" Foreground="{StaticResource Dim}" VerticalAlignment="Center" Margin="0,0,8,0"/>
                         <TextBox x:Name="HostIpBox" VerticalAlignment="Center" 
                                  Text="{Binding HostIp, UpdateSourceTrigger=PropertyChanged}"
                                  AutomationProperties.AutomationId="HostIpBox"/>
