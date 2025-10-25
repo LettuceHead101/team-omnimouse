@@ -15,15 +15,23 @@ namespace OmniMouse.Network
         private const int UdpPort = 5000;
         private readonly Func<int, IUdpClient> _udpClientFactoryWithPort;
         private readonly Func<IUdpClient> _udpClientFactory;
+        private readonly Action<int, int> _setCursorPos;
         private Thread? _recvThread;
         private volatile bool _running;
 
-        public UdpMouseTransmitter() : this(() => new UdpClientAdapter(), port => new UdpClientAdapter(port)) { }
+        public UdpMouseTransmitter()
+            : this(() => new UdpClientAdapter(), port => new UdpClientAdapter(port), NativeSetCursorPos) { }
 
         public UdpMouseTransmitter(Func<IUdpClient> udpClientFactory, Func<int, IUdpClient> udpClientFactoryWithPort)
+            : this(udpClientFactory, udpClientFactoryWithPort, NativeSetCursorPos) { }
+
+        public UdpMouseTransmitter(Func<IUdpClient> udpClientFactory,
+                                   Func<int, IUdpClient> udpClientFactoryWithPort,
+                                   Action<int, int> setCursorPos)
         {
             _udpClientFactory = udpClientFactory ?? throw new ArgumentNullException(nameof(udpClientFactory));
             _udpClientFactoryWithPort = udpClientFactoryWithPort ?? throw new ArgumentNullException(nameof(udpClientFactoryWithPort));
+            _setCursorPos = setCursorPos ?? NativeSetCursorPos;
         }
 
         public void StartHost()
@@ -193,12 +201,14 @@ namespace OmniMouse.Network
                 {
                     if (!_running) break;
                     Console.WriteLine($"[UDP][Receive] Exception: {ex.Message}");
-                    Thread.Sleep(1); // avoid busy loop
+                    Thread.Sleep(1);
                 }
             }
-        } 
+        }
 
         [DllImport("user32.dll")]
         private static extern bool SetCursorPos(int X, int Y);
+
+        private static void NativeSetCursorPos(int X, int Y) => SetCursorPos(X, Y);
     }
 }
