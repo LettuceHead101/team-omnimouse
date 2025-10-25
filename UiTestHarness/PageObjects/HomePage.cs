@@ -16,10 +16,9 @@ namespace UiTestHarness.PageObjects
         // Typed accessors that search by AutomationId added to the WPF XAML.
         // They are nullable because the element may not exist (tests should handle that).
         public TextBox? HostIpBox => _window.FindFirstDescendant(cf => cf.ByAutomationId("HostIpBox"))?.AsTextBox();
-        public Button? HostButton => _window.FindFirstDescendant(cf => cf.ByAutomationId("HostButton"))?.AsButton();
-        public Button? CohostButton => _window.FindFirstDescendant(cf => cf.ByAutomationId("CohostButton"))?.AsButton();
         public Button? DisconnectButton => _window.FindFirstDescendant(cf => cf.ByAutomationId("DisconnectButton"))?.AsButton();
         public TextBox? ConsoleOutputBox => _window.FindFirstDescendant(cf => cf.ByAutomationId("ConsoleOutputBox"))?.AsTextBox();
+        public Button? ConnectButton => _window.FindFirstDescendant(cf => cf.ByAutomationId("ConnectButton"))?.AsButton();
 
         // High-level operations with defensive checks:
 
@@ -30,19 +29,11 @@ namespace UiTestHarness.PageObjects
             tb.Text = ip ?? string.Empty;
         }
 
-        // Click the Host button (sender)
-        public void ClickHost()
+        // Click the Connect button
+        public void ClickConnect()
         {
-            var btn = HostButton ?? throw new InvalidOperationException("HostButton not found in UI.");
-            if (!btn.IsEnabled) throw new InvalidOperationException("HostButton is disabled.");
-            btn.Invoke();
-        }
-
-        // Click the Cohost button (receiver)
-        public void ClickCohost()
-        {
-            var btn = CohostButton ?? throw new InvalidOperationException("CohostButton not found in UI.");
-            if (!btn.IsEnabled) throw new InvalidOperationException("CohostButton is disabled.");
+            var btn = ConnectButton ?? throw new InvalidOperationException("ConnectButton not found in UI.");
+            if (!btn.IsEnabled) throw new InvalidOperationException("ConnectButton is disabled.");
             btn.Invoke();
         }
 
