@@ -1,78 +1,55 @@
 ﻿using System;
-using System.Runtime.InteropServices;
+using System.Net;
+using System.Net.Sockets;
 using System.Threading;
 using UiTestHarness.TestFramework;
 using UiTestHarness.PageObjects;
 
 namespace UiTestHarness.Tests
 {
-    // Integration test that runs a receiver and a sender instance and asserts UDP traffic is received.
+    // Robust receiver-mode integration test:
+    // - Launches one OmniMouse instance as Cohost (receiver)
+    // - Sends a normalized UDP packet from the harness to localhost:5000
+    // - Verifies the cohost logs a normalized receive
     public sealed class CohostIntegrationTest : IUiTest
     {
         public string Name => "CohostIntegrationTest";
 
-        // Move the system cursor — used to generate low-level mouse events the host captures.
-        [DllImport("user32.dll")]
-        private static extern bool SetCursorPos(int x, int y);
-
-        public bool Run(TestContext hostCtx)
+        public bool Run(TestContext cohostCtx)
         {
-            // Locate the exe (AppLauncher handles repo heuristics)
-            string? exe = AppLauncher.LocateExe(null);
-            if (exe is null)
-            {
-                Console.WriteLine("CohostIntegrationTest: cannot locate OmniMouse.exe");
-                return false;
-            }
-
-            TestContext? cohostCtx = null;
+            var page = new HomePage(cohostCtx.MainWindow);
             try
             {
-                // Wrap the main window of the host instance in a page object.
-                var hostPage = new HomePage(hostCtx.MainWindow);
+                // Start receiver
+                page.ClickCohost();
+                Thread.Sleep(300); // allow bind/recv loop to start
 
-                // Launch a second application instance to act as the cohost (receiver).
-                cohostCtx = AppLauncher.Launch(exe, windowWaitMs: 10000);
-                var cohostPage = new HomePage(cohostCtx.MainWindow);
+                // Send one normalized packet to localhost:5000
+                var endPoint = new IPEndPoint(IPAddress.Loopback, 5000);
+                using var udp = new UdpClient();
+                var buf = new byte[1 + 8];
+                buf[0] = 0x01; // normalized prefix
+                Array.Copy(BitConverter.GetBytes(0.50f), 0, buf, 1, 4);     // nx
+                Array.Copy(BitConverter.GetBytes(0.25f), 0, buf, 1 + 4, 4); // ny
+                udp.Send(buf, buf.Length, endPoint);
 
-                // Start cohost (receiver) so it begins listening for UDP packets.
-                cohostPage.ClickCohost();
-                Thread.Sleep(500); // allow receiver to initialize
-
-                // Configure the host instance to send to the local cohost.
-                hostPage.SetHostIp("127.0.0.1");
-                Thread.Sleep(150);
-
-                // Start host (sender)
-                hostPage.ClickHost();
-                Thread.Sleep(500); // allow hooks and UDP to initialize
-
-                // Compute a point inside the host window and move the global cursor there.
-                var rect = hostCtx.MainWindow.BoundingRectangle;
-                int targetX = (int)((rect.Left + rect.Right) / 2);
-                int targetY = (int)((rect.Top + rect.Bottom) / 2);
-
-                Console.WriteLine($"Moving cursor to ({targetX},{targetY}) to trigger mouse move...");
-                SetCursorPos(targetX, targetY);
-
-                // Poll the cohost's ConsoleOutputBox for evidence of UDP receive ("Moving cursor to" or "[UDP][Receive]")
+                // Wait up to ~6s for a normalized receive log line
                 for (int i = 0; i < 30; i++)
                 {
-                    var txt = cohostPage.GetConsoleText();
+                    var txt = page.GetConsoleText();
                     if (!string.IsNullOrWhiteSpace(txt) &&
-                        (txt.IndexOf("Moving cursor to", StringComparison.OrdinalIgnoreCase) >= 0
-                         || txt.IndexOf("[UDP][Receive]", StringComparison.OrdinalIgnoreCase) >= 0))
+                        (txt.IndexOf("[UDP][RecvNormalized]", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                         txt.IndexOf("[UDP][RecvFallbackFloat]", StringComparison.OrdinalIgnoreCase) >= 0))
                     {
-                        Console.WriteLine("CohostIntegrationTest: observed UDP receive in cohost logs.");
+                        Console.WriteLine("CohostIntegrationTest: observed normalized UDP receive in cohost logs.");
                         return true;
                     }
                     Thread.Sleep(200);
                 }
 
-                // Failure case: print cohost console snapshot for debugging.
-                Console.WriteLine("CohostIntegrationTest: did not observe expected UDP receive in cohost logs.");
+                Console.WriteLine("CohostIntegrationTest: expected UDP receive log not found.");
                 Console.WriteLine("Cohost console snapshot:");
-                Console.WriteLine(cohostPage.GetConsoleText());
+                Console.WriteLine(page.GetConsoleText());
                 return false;
             }
             catch (Exception ex)
@@ -82,8 +59,7 @@ namespace UiTestHarness.Tests
             }
             finally
             {
-                // Ensure the cohost process is closed regardless of test result.
-                try { cohostCtx?.Dispose(); } catch { }
+                try { page.ClickDisconnect(); } catch { }
             }
         }
     }

@@ -14,15 +14,23 @@ namespace OmniMouse.Network
         private const int UdpPort = 5000;
         private readonly Func<int, IUdpClient> _udpClientFactoryWithPort;
         private readonly Func<IUdpClient> _udpClientFactory;
+        private readonly Action<int, int> _setCursorPos;
         private Thread? _recvThread;
         private volatile bool _running;
 
-        public UdpMouseTransmitter() : this(() => new UdpClientAdapter(), port => new UdpClientAdapter(port)) { }
+        public UdpMouseTransmitter()
+            : this(() => new UdpClientAdapter(), port => new UdpClientAdapter(port), NativeSetCursorPos) { }
 
         public UdpMouseTransmitter(Func<IUdpClient> udpClientFactory, Func<int, IUdpClient> udpClientFactoryWithPort)
+            : this(udpClientFactory, udpClientFactoryWithPort, NativeSetCursorPos) { }
+
+        public UdpMouseTransmitter(Func<IUdpClient> udpClientFactory,
+                                   Func<int, IUdpClient> udpClientFactoryWithPort,
+                                   Action<int, int> setCursorPos)
         {
             _udpClientFactory = udpClientFactory ?? throw new ArgumentNullException(nameof(udpClientFactory));
             _udpClientFactoryWithPort = udpClientFactoryWithPort ?? throw new ArgumentNullException(nameof(udpClientFactoryWithPort));
+            _setCursorPos = setCursorPos ?? NativeSetCursorPos;
         }
 
         public void StartHost()
@@ -127,14 +135,14 @@ namespace OmniMouse.Network
 
                         CoordinateNormalizer.NormalizedToScreen(nx, ny, out var sx, out var sy);
                         Console.WriteLine($"[UDP][RecvNormalized] mapped -> ({sx},{sy})");
-                        SetCursorPos(sx, sy);
+                        _setCursorPos(sx, sy);
                     }
                     else if (data[0] == 0x02 && data.Length >= 1 + 8)
                     {
                         var x = BitConverter.ToInt32(data, 1);
                         var y = BitConverter.ToInt32(data, 1 + 4);
                         Console.WriteLine($"[UDP][RecvLegacy] from {remoteEP.Address}:{remoteEP.Port} -> ({x},{y})");
-                        SetCursorPos(x, y);
+                        _setCursorPos(x, y);
                     }
                     else
                     {
@@ -146,14 +154,14 @@ namespace OmniMouse.Network
                             {
                                 CoordinateNormalizer.NormalizedToScreen(nx, ny, out var sx, out var sy);
                                 Console.WriteLine($"[UDP][RecvFallbackFloat] nx={nx:F6}, ny={ny:F6} -> ({sx},{sy})");
-                                SetCursorPos(sx, sy);
+                                _setCursorPos(sx, sy);
                             }
                             else
                             {
                                 var ix = BitConverter.ToInt32(data, 0);
                                 var iy = BitConverter.ToInt32(data, 4);
                                 Console.WriteLine($"[UDP][RecvFallbackInt] -> ({ix},{iy})");
-                                SetCursorPos(ix, iy);
+                                _setCursorPos(ix, iy);
                             }
                         }
                         else
@@ -166,12 +174,14 @@ namespace OmniMouse.Network
                 catch (Exception ex)
                 {
                     Console.WriteLine($"[UDP][Receive] Exception: {ex.Message}");
-                    Thread.Sleep(1); // avoid busy loop
+                    Thread.Sleep(1);
                 }
             }
-        } 
+        }
 
         [DllImport("user32.dll")]
         private static extern bool SetCursorPos(int X, int Y);
+
+        private static void NativeSetCursorPos(int X, int Y) => SetCursorPos(X, Y);
     }
 }
