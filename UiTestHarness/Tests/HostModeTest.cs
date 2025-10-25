@@ -4,11 +4,10 @@ using UiTestHarness.PageObjects;
 
 namespace UiTestHarness.Tests
 {
-    // Small deterministic test that exercises the Host flow in the UI.
-    // It uses the HomePage page object rather than raw FlaUI calls.
+    // Updated: simple Connect smoke test against the new peer mode
     public sealed class HostModeTest : IUiTest
     {
-        public string Name => "HostModeTest";
+        public string Name => "ConnectSmokeTest";
 
         public bool Run(TestContext context)
         {
@@ -16,38 +15,35 @@ namespace UiTestHarness.Tests
 
             try
             {
-                // Enter the host IP (we use localhost here for safety)
                 page.SetHostIp("127.0.0.1");
-
-                // Short pause to let binding propagate (replaceable later by WaitHelper)
                 System.Threading.Thread.Sleep(150);
 
-                // Click Host button to start sender hooks+UDP
-                page.ClickHost();
+                page.ClickConnect();
 
-                // Poll ConsoleOutputBox for the expected sign that host started.
-                // This loop checks up to ~5 seconds (25 * 200ms)
-                for (int i = 0; i < 25; i++)
+                // Accept either the ViewModel log or UDP init log as success signal
+                for (int i = 0; i < 30; i++)
                 {
                     var txt = page.GetConsoleText();
-                    if (!string.IsNullOrWhiteSpace(txt) && txt.IndexOf("Starting Host", StringComparison.OrdinalIgnoreCase) >= 0)
-                        return true; // success condition observed
+                    if (!string.IsNullOrWhiteSpace(txt) &&
+                        (txt.IndexOf("Connecting to peer", StringComparison.OrdinalIgnoreCase) >= 0
+                         || txt.IndexOf("Peer mode bound", StringComparison.OrdinalIgnoreCase) >= 0
+                         || txt.IndexOf("[UDP][SendNormalized]", StringComparison.OrdinalIgnoreCase) >= 0))
+                    {
+                        return true;
+                    }
                     System.Threading.Thread.Sleep(200);
                 }
 
-                // If loop completes, the expected log wasn't found — test fails.
-                Console.WriteLine("HostModeTest: expected log not found.");
+                Console.WriteLine("ConnectSmokeTest: expected log not found.");
                 return false;
             }
             catch (Exception ex)
             {
-                // Any exception is treated as test failure; print details for debugging.
-                Console.WriteLine($"HostModeTest: exception {ex}");
+                Console.WriteLine($"ConnectSmokeTest: exception {ex}");
                 return false;
             }
             finally
             {
-                // Best-effort cleanup to return the app to a neutral state for later tests.
                 try { page.ClickDisconnect(); } catch { }
             }
         }
