@@ -21,6 +21,18 @@ namespace OmniMouse.Hooks
         private static readonly HookProc _mouseProc;
         private static InputHooks? _instance;
 
+        // Feedback-loop suppression
+        private static int _suppressX = int.MinValue;
+        private static int _suppressY = int.MinValue;
+        private static int _suppressCount = 0;
+
+        public static void SuppressNextMoveFrom(int x, int y)
+        {
+            _suppressX = x;
+            _suppressY = y;
+            _suppressCount = 2; // tolerate duplicate low-level events
+        }
+
         // Win32 constants
         private const int WH_KEYBOARD_LL = 13;
         private const int WH_MOUSE_LL = 14;
@@ -89,8 +101,6 @@ namespace OmniMouse.Hooks
         private static extern bool PostQuitMessage(int nExitCode);
         [DllImport("user32.dll")]
         private static extern short GetKeyState(int nVirtKey);
-        [DllImport("user32.dll")]
-        private static extern bool SetCursorPos(int X, int Y);
 
         static InputHooks()
         {
@@ -163,26 +173,24 @@ namespace OmniMouse.Hooks
                 switch ((int)wParam)
                 {
                     case WM_MOUSEMOVE:
-                        // Existing behavior logged raw mouse coords for debugging.
                         Console.WriteLine($"[MOVE] ({ms.pt.x}, {ms.pt.y})");
+
+                        // If this move was immediately caused by our own SetCursorPos (remote receive), suppress sending it back.
+                        if (_suppressCount > 0 && ms.pt.x == _suppressX && ms.pt.y == _suppressY)
+                        {
+                            _suppressCount--;
+                            break;
+                        }
 
                         if (_instance != null)
                         {
                             try
                             {
-                                // IMPORTANT CHANGE:
-                                // - We no longer send raw pixel ints here.
-                                // - Instead we normalize the raw screen coordinates (ms.pt) to [0..1]
-                                //   relative to the sender's virtual desktop, then send those floats.
-                                // - The receiver maps those normalized values to its own virtual desktop.
-                                //
-                                // This change is the main fix for resolution/aspect-ratio parity issues.
                                 CoordinateNormalizer.ScreenToNormalized(ms.pt.x, ms.pt.y, out var nx, out var ny);
                                 _instance._udpTransmitter?.SendNormalizedMousePosition(nx, ny);
                             }
                             catch (Exception ex)
                             {
-                                // Hooks must be robust; swallow exceptions and log so hooks don't crash the process.
                                 Console.WriteLine($"[HOOK] Failed to send normalized mouse position: {ex.Message}");
                             }
                         }
