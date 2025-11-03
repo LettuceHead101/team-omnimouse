@@ -3,9 +3,12 @@ using System.Collections.Generic;
 using System.Windows;
 using System.Windows.Input;
 using System.Threading;
+using System.Threading.Tasks;
 using OmniMouse.Hooks;
 using OmniMouse.MVVM;
 using OmniMouse.Network;
+using OmniMouse.Model;
+using OmniMouse.Storage;
 
 namespace OmniMouse.ViewModel
 {
@@ -21,8 +24,8 @@ namespace OmniMouse.ViewModel
         private readonly List<string> _consoleLines = new();
         private const int MaxConsoleLines = 20;
 
-        public string ConsoleOutput 
-        { 
+        public string ConsoleOutput
+        {
             get => _consoleOutput;
             set => SetProperty(ref _consoleOutput, value);
         }
@@ -47,25 +50,88 @@ namespace OmniMouse.ViewModel
 
         public HomePageViewModel()
         {
-            ConnectCommand = new RelayCommand(ExecuteConnect, CanExecuteConnect);
+            // Use async connect flow (no-IP required)
+            ConnectCommand = new RelayCommand(async _ => await ExecuteConnectAsync(), CanExecuteConnect);
             DisconnectCommand = new RelayCommand(ExecuteDisconnect, CanExecuteDisconnect);
 
             App.ConsoleOutputReceived += OnConsoleOutputReceived;
         }
 
-        private void ExecuteConnect(object? parameter)
+        // New: zero-friction connect
+        private async Task ExecuteConnectAsync()
         {
-            if (string.IsNullOrWhiteSpace(HostIp))
+            // Manual override still supported; also persist it for next launch
+            if (!string.IsNullOrWhiteSpace(HostIp))
             {
-                WriteToConsole("Enter the peer's IP before connecting.");
+                WriteToConsole($"Connecting to peer at {HostIp} (manual)...");
+                BeginUdpAndHooks(HostIp);
+
+                // Save manual peer so future launches can auto-connect without typing
+                KnownPeersStore.Upsert(new PeerInfo
+                {
+                    Id = Guid.Empty,           // unknown without discovery; Upsert matches by IP as well
+                    Name = HostIp,
+                    Ip = HostIp,
+                    Port = 5000,
+                    LastSeenUtc = DateTime.UtcNow
+                });
                 return;
             }
 
-            WriteToConsole($"Connecting to peer at {HostIp} (bidirectional)...");
+            // 1) Try known peers first
+            var known = KnownPeersStore.Load();
+            foreach (var kp in known)
+            {
+                if (TryBeginUdp(kp.Ip))
+                {
+                    WriteToConsole($"Connecting to known peer {kp.Name} at {kp.Ip}...");
+                    StartHooks(_udp!);
+                    IsConnected = true;
+                    return;
+                }
+            }
+
+            // 2) Auto-discover on LAN
+            WriteToConsole("Discovering peers on LAN...");
+            _discovery = new PeerDiscovery();
+            _discovery.Start();
+
+            var peer = await _discovery.WaitForFirstPeerAsync(TimeSpan.FromSeconds(3));
+            if (peer == null)
+            {
+                WriteToConsole("No peers discovered. You can still enter an IP manually.");
+                _discovery.Dispose(); _discovery = null;
+                return;
+            }
+
+            WriteToConsole($"Discovered peer {peer.Name} at {peer.Ip}. Connecting...");
+            KnownPeersStore.Upsert(peer); // persist for next time
+            BeginUdpAndHooks(peer.Ip);
+        }
+
+        private void BeginUdpAndHooks(string ip)
+        {
             _udp = new UdpMouseTransmitter();
-            _udp.StartPeer(HostIp);
+            _udp.StartPeer(ip);
             StartHooks(_udp);
             IsConnected = true;
+        }
+
+        private bool TryBeginUdp(string ip)
+        {
+            try
+            {
+                _udp = new UdpMouseTransmitter();
+                _udp.StartPeer(ip);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[AutoConnect] Failed to start peer to {ip}: {ex.Message}");
+                try { _udp?.Disconnect(); } catch { }
+                _udp = null;
+                return false;
+            }
         }
 
         private void ExecuteDisconnect(object? parameter)
@@ -73,8 +139,10 @@ namespace OmniMouse.ViewModel
             WriteToConsole("Disconnecting session...");
             _hooks?.UninstallHooks();
             _udp?.Disconnect();
+            _discovery?.Dispose();
             _hooks = null;
             _udp = null;
+            _discovery = null;
             IsConnected = false;
         }
 
@@ -126,8 +194,10 @@ namespace OmniMouse.ViewModel
             App.ConsoleOutputReceived -= OnConsoleOutputReceived;
             _hooks?.UninstallHooks();
             _udp?.Disconnect();
+            _discovery?.Dispose();
             _hooks = null;
             _udp = null;
+            _discovery = null;
         }
     }
 
