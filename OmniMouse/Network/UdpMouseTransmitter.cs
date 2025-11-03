@@ -72,21 +72,6 @@ namespace OmniMouse.Network
             _recvThread.Start();
         }
 
-        // Send raw pixel ints (legacy)
-        public void SendMousePosition(int x, int y)
-        {
-            if (_udpClient == null) return;
-            if (_remoteEndPoint != null)
-            {
-                // simple legacy format: prefix 0x02, then two 4-byte ints
-                var buf = new byte[1 + 8];
-                buf[0] = 0x02;
-                Array.Copy(BitConverter.GetBytes(x), 0, buf, 1, 4);
-                Array.Copy(BitConverter.GetBytes(y), 0, buf, 1 + 4, 4);
-                _udpClient.Send(buf, buf.Length, _remoteEndPoint);
-            }
-        }
-
         // NEW: send two normalized floats (0..1). Message type 0x01 then 8 bytes of floats.
         public void SendNormalizedMousePosition(float normalizedX, float normalizedY)
         {
@@ -158,7 +143,7 @@ namespace OmniMouse.Network
 
                         // Prevent feedback loop: suppress the very next local move from this exact position
                         InputHooks.SuppressNextMoveFrom(sx, sy);
-                        SetCursorPos(sx, sy);
+                        _setCursorPos(sx, sy);
                     }
                     else if (data[0] == 0x02 && data.Length >= 1 + 8)
                     {
@@ -166,7 +151,7 @@ namespace OmniMouse.Network
                         var y = BitConverter.ToInt32(data, 1 + 4);
                         Console.WriteLine($"[UDP][RecvLegacy] from {remoteEP.Address}:{remoteEP.Port} -> ({x},{y})");
                         InputHooks.SuppressNextMoveFrom(x, y);
-                        SetCursorPos(x, y);
+                        _setCursorPos(x, y);
                     }
                     else
                     {
@@ -179,7 +164,7 @@ namespace OmniMouse.Network
                                 CoordinateNormalizer.NormalizedToScreen(nx, ny, out var sx, out var sy);
                                 Console.WriteLine($"[UDP][RecvFallbackFloat] nx={nx:F6}, ny={ny:F6} -> ({sx},{sy})");
                                 InputHooks.SuppressNextMoveFrom(sx, sy);
-                                SetCursorPos(sx, sy);
+                                _setCursorPos(sx, sy);
                             }
                             else
                             {
@@ -187,7 +172,7 @@ namespace OmniMouse.Network
                                 var iy = BitConverter.ToInt32(data, 4);
                                 Console.WriteLine($"[UDP][RecvFallbackInt] -> ({ix},{iy})");
                                 InputHooks.SuppressNextMoveFrom(ix, iy);
-                                SetCursorPos(ix, iy);
+                                _setCursorPos(ix, iy);
                             }
                         }
                         else

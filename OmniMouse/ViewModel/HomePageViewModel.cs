@@ -13,6 +13,7 @@ namespace OmniMouse.ViewModel
     {
         private InputHooks? _hooks;
         private UdpMouseTransmitter? _udp;
+        private PeerDiscovery? _discovery;
         private string _consoleOutput = string.Empty;
         private string _hostIp = string.Empty;
         private bool _isConnected;

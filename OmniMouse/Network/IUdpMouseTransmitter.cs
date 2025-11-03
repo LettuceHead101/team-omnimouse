@@ -14,8 +14,8 @@ namespace OmniMouse.Network
         // NEW: Symmetric peer mode — bind to the well-known port and set the remote peer to send to.
         void StartPeer(string peerIp);
 
-        // Legacy: send raw screen pixel coordinates (int x, int y).
-        void SendMousePosition(int x, int y);
+        //// Legacy: send raw screen pixel coordinates (int x, int y).
+        //void SendMousePosition(int x, int y);
 
         // Send normalized coordinates in [0..1] (bottom-left = 0,0; top-right = 1,1).
         void SendNormalizedMousePosition(float normalizedX, float normalizedY);
