@@ -1,7 +1,7 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio Version 17
-VisualStudioVersion = 17.14.36414.22
+# Visual Studio Version 18
+VisualStudioVersion = 18.0.11217.181
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OmniMouse", "OmniMouse\OmniMouse.csproj", "{A3DFA5CC-D72F-42DD-B950-6FEB2A3490FB}"
 EndProject
@@ -9,9 +9,9 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{827E0CD3-B72
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OmniMouse.Core", "src\OmniMouse.Core\OmniMouse.Core.csproj", "{C768B9D1-3908-480B-9249-4A3C5FC46F9C}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NetworkTestProject1", "NetworkTestProject1\NetworkTestProject1.csproj", "{7497D156-B1BD-4303-B10E-8646426E5D1F}"
-EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "UiTestHarness", "UiTestHarness\UiTestHarness.csproj", "{BBAD3198-9002-4009-A1E3-19FE02F8D2F8}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NetworkTestProject1", "NetworkTestProject1\NetworkTestProject1.csproj", "{E704663E-0C6D-DFD6-B408-CBE67CEC97C7}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -47,18 +47,6 @@ Global
 		{C768B9D1-3908-480B-9249-4A3C5FC46F9C}.Release|x64.Build.0 = Release|Any CPU
 		{C768B9D1-3908-480B-9249-4A3C5FC46F9C}.Release|x86.ActiveCfg = Release|Any CPU
 		{C768B9D1-3908-480B-9249-4A3C5FC46F9C}.Release|x86.Build.0 = Release|Any CPU
-		{7497D156-B1BD-4303-B10E-8646426E5D1F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{7497D156-B1BD-4303-B10E-8646426E5D1F}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{7497D156-B1BD-4303-B10E-8646426E5D1F}.Debug|x64.ActiveCfg = Debug|Any CPU
-		{7497D156-B1BD-4303-B10E-8646426E5D1F}.Debug|x64.Build.0 = Debug|Any CPU
-		{7497D156-B1BD-4303-B10E-8646426E5D1F}.Debug|x86.ActiveCfg = Debug|Any CPU
-		{7497D156-B1BD-4303-B10E-8646426E5D1F}.Debug|x86.Build.0 = Debug|Any CPU
-		{7497D156-B1BD-4303-B10E-8646426E5D1F}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{7497D156-B1BD-4303-B10E-8646426E5D1F}.Release|Any CPU.Build.0 = Release|Any CPU
-		{7497D156-B1BD-4303-B10E-8646426E5D1F}.Release|x64.ActiveCfg = Release|Any CPU
-		{7497D156-B1BD-4303-B10E-8646426E5D1F}.Release|x64.Build.0 = Release|Any CPU
-		{7497D156-B1BD-4303-B10E-8646426E5D1F}.Release|x86.ActiveCfg = Release|Any CPU
-		{7497D156-B1BD-4303-B10E-8646426E5D1F}.Release|x86.Build.0 = Release|Any CPU
 		{BBAD3198-9002-4009-A1E3-19FE02F8D2F8}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{BBAD3198-9002-4009-A1E3-19FE02F8D2F8}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{BBAD3198-9002-4009-A1E3-19FE02F8D2F8}.Debug|x64.ActiveCfg = Debug|Any CPU
@@ -71,6 +59,18 @@ Global
 		{BBAD3198-9002-4009-A1E3-19FE02F8D2F8}.Release|x64.Build.0 = Release|Any CPU
 		{BBAD3198-9002-4009-A1E3-19FE02F8D2F8}.Release|x86.ActiveCfg = Release|Any CPU
 		{BBAD3198-9002-4009-A1E3-19FE02F8D2F8}.Release|x86.Build.0 = Release|Any CPU
+		{E704663E-0C6D-DFD6-B408-CBE67CEC97C7}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{E704663E-0C6D-DFD6-B408-CBE67CEC97C7}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{E704663E-0C6D-DFD6-B408-CBE67CEC97C7}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{E704663E-0C6D-DFD6-B408-CBE67CEC97C7}.Debug|x64.Build.0 = Debug|Any CPU
+		{E704663E-0C6D-DFD6-B408-CBE67CEC97C7}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{E704663E-0C6D-DFD6-B408-CBE67CEC97C7}.Debug|x86.Build.0 = Debug|Any CPU
+		{E704663E-0C6D-DFD6-B408-CBE67CEC97C7}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{E704663E-0C6D-DFD6-B408-CBE67CEC97C7}.Release|Any CPU.Build.0 = Release|Any CPU
+		{E704663E-0C6D-DFD6-B408-CBE67CEC97C7}.Release|x64.ActiveCfg = Release|Any CPU
+		{E704663E-0C6D-DFD6-B408-CBE67CEC97C7}.Release|x64.Build.0 = Release|Any CPU
+		{E704663E-0C6D-DFD6-B408-CBE67CEC97C7}.Release|x86.ActiveCfg = Release|Any CPU
+		{E704663E-0C6D-DFD6-B408-CBE67CEC97C7}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
