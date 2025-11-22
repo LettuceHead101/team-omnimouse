@@ -12,11 +12,6 @@ namespace OmniMouse.Network
             _udpClient = new UdpClient(port);
         }
 
-        public UdpClientAdapter()
-        {
-            _udpClient = new UdpClient();
-        }
-
         public Socket Client => _udpClient.Client;
 
         public void Close() => _udpClient.Close();
