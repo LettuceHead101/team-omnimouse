@@ -92,10 +92,18 @@ namespace OmniMouse.Switching
         public void OnMouseMove(int x, int y)
         {
             if (!_isRunning)
+            {
+                Console.WriteLine($"[MultiMachineSwitcher] OnMouseMove({x},{y}) - NOT RUNNING");
                 return;
+            }
 
             if (_currentBounds == null)
+            {
+                Console.WriteLine($"[MultiMachineSwitcher] OnMouseMove({x},{y}) - NO BOUNDS");
                 return;
+            }
+
+            //Console.WriteLine($"[MultiMachineSwitcher] OnMouseMove({x},{y}) - evaluating");
 
             // Build evaluation context
             var context = new MouseMoveContext
@@ -111,6 +119,8 @@ namespace OmniMouse.Switching
 
             // Evaluate switch policy
             var decision = _policy.Evaluate(context);
+
+            //Console.WriteLine($"[MultiMachineSwitcher] Policy evaluation result: ShouldSwitch={decision.ShouldSwitch}, Target={decision.TargetMachine}");
 
             if (decision.ShouldSwitch && !string.IsNullOrWhiteSpace(decision.TargetMachine))
             {

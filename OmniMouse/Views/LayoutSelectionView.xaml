@@ -1,0 +1,253 @@
+<Window x:Class="OmniMouse.Views.LayoutSelectionView"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d"
+        Title="Configure PC Layout" 
+        Height="400" 
+        Width="700"
+        WindowStartupLocation="CenterScreen"
+        ResizeMode="NoResize"
+        Background="#1E1E1E">
+
+    <Window.Resources>
+        <!-- Style for machine cards -->
+        <Style x:Key="MachineCardStyle" TargetType="Border">
+            <Setter Property="Background" Value="#2D2D30"/>
+            <Setter Property="BorderBrush" Value="#3F3F46"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="4"/>
+            <Setter Property="Padding" Value="12"/>
+            <Setter Property="Margin" Value="8"/>
+            <Setter Property="MinWidth" Value="150"/>
+            <Setter Property="MinHeight" Value="80"/>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="BorderBrush" Value="#007ACC"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <!-- Style for local machine card (draggable) -->
+        <Style x:Key="LocalMachineCardStyle" TargetType="Border" BasedOn="{StaticResource MachineCardStyle}">
+            <Setter Property="Background" Value="#0E639C"/>
+            <Setter Property="BorderBrush" Value="#1177BB"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="#1177BB"/>
+                    <Setter Property="BorderBrush" Value="#1890FF"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <!-- Style for position slot -->
+        <Style x:Key="PositionSlotStyle" TargetType="Border">
+            <Setter Property="Background" Value="#252526"/>
+            <Setter Property="BorderBrush" Value="#3F3F46"/>
+            <Setter Property="BorderThickness" Value="2"/>
+            <Setter Property="CornerRadius" Value="4"/>
+            <Setter Property="Margin" Value="8"/>
+            <Setter Property="MinWidth" Value="150"/>
+            <Setter Property="MinHeight" Value="80"/>
+        </Style>
+
+        <BooleanToVisibilityConverter x:Key="BoolToVis"/>
+    </Window.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Header -->
+        <Border Grid.Row="0" Background="#2D2D30" Padding="20,15">
+            <StackPanel>
+                <TextBlock Text="Configure PC Layout" 
+                           FontSize="20" 
+                           FontWeight="SemiBold" 
+                           Foreground="White"/>
+                <TextBlock Text="Arrange your PC position relative to other connected machines" 
+                           FontSize="12" 
+                           Foreground="#CCCCCC" 
+                           Margin="0,5,0,0"/>
+            </StackPanel>
+        </Border>
+
+        <!-- Layout Grid -->
+        <ScrollViewer Grid.Row="1" 
+                      HorizontalScrollBarVisibility="Auto" 
+                      VerticalScrollBarVisibility="Disabled"
+                      Margin="20">
+            <ItemsControl x:Name="LayoutGrid" ItemsSource="{Binding Machines}">
+                <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center"/>
+                    </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <Border AllowDrop="True"
+                                Drop="OnDrop"
+                                DragOver="OnDragOver"
+                                MouseLeftButtonDown="OnMachineMouseDown">
+                            <Border.Style>
+                                <Style TargetType="Border" BasedOn="{StaticResource MachineCardStyle}">
+                                    <Style.Triggers>
+                                        <!-- Empty slot - subtle drop zone -->
+                                        <DataTrigger Binding="{Binding IsEmptySlot}" Value="True">
+                                            <Setter Property="Background" Value="Transparent"/>
+                                            <Setter Property="BorderBrush" Value="#3F3F46"/>
+                                            <Setter Property="BorderThickness" Value="2"/>
+                                            <Setter Property="Opacity" Value="0.6"/>
+                                        </DataTrigger>
+                                        <!-- Local machine - highlight differently -->
+                                        <DataTrigger Binding="{Binding IsLocal}" Value="True">
+                                            <Setter Property="Background" Value="#0E639C"/>
+                                            <Setter Property="BorderBrush" Value="#1177BB"/>
+                                            <Setter Property="Cursor" Value="Hand"/>
+                                        </DataTrigger>
+                                        <!-- Peer machine - also draggable -->
+                                        <MultiDataTrigger>
+                                            <MultiDataTrigger.Conditions>
+                                                <Condition Binding="{Binding IsLocal}" Value="False"/>
+                                                <Condition Binding="{Binding IsEmptySlot}" Value="False"/>
+                                            </MultiDataTrigger.Conditions>
+                                            <Setter Property="Cursor" Value="Hand"/>
+                                        </MultiDataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Border.Style>
+
+                            <Grid>
+                                <!-- Machine details (hidden for empty slots) -->
+                                <StackPanel>
+                                    <StackPanel.Style>
+                                        <Style TargetType="StackPanel">
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsEmptySlot}" Value="True">
+                                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </StackPanel.Style>
+                                    
+                                    <!-- Machine type badge -->
+                                    <Border CornerRadius="2"
+                                            Padding="4,2"
+                                            HorizontalAlignment="Left"
+                                            Margin="0,0,0,8">
+                                        <Border.Style>
+                                            <Style TargetType="Border">
+                                                <Setter Property="Background" Value="#666666"/>
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsLocal}" Value="True">
+                                                        <Setter Property="Background" Value="#FFD700"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Border.Style>
+                                        <TextBlock Text="{Binding TypeDisplay}" 
+                                                 FontSize="10" 
+                                                 FontWeight="Bold"
+                                                 Foreground="White"/>
+                                    </Border>
+
+                                    <!-- Machine name -->
+                                    <TextBlock Text="{Binding DisplayName}" 
+                                             FontSize="14" 
+                                             FontWeight="SemiBold"
+                                             Foreground="White"
+                                             TextWrapping="Wrap"/>
+
+                                    <!-- Position -->
+                                    <TextBlock Text="{Binding PositionDisplay}" 
+                                             FontSize="11" 
+                                             Foreground="#CCCCCC"
+                                             Margin="0,4,0,0"/>
+                                </StackPanel>
+                                
+                                <!-- Empty slot indicator (only visible for empty slots) -->
+                                <TextBlock HorizontalAlignment="Center"
+                                          VerticalAlignment="Center"
+                                          FontSize="12"
+                                          Foreground="#666666"
+                                          Text="{Binding PositionDisplay}">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsEmptySlot}" Value="True">
+                                                    <Setter Property="Visibility" Value="Visible"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                            </Grid>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </ScrollViewer>
+
+        <!-- Status Bar -->
+        <Border Grid.Row="2" Background="#2D2D30" Padding="20,12" BorderBrush="#3F3F46" BorderThickness="0,1,0,0">
+            <StackPanel>
+                <TextBlock Text="{Binding StatusMessage}" 
+                           FontSize="13" 
+                           Foreground="#CCCCCC"
+                           TextWrapping="Wrap"/>
+                <TextBlock Text="💡 Drag any PC card to arrange the layout" 
+                           FontSize="11" 
+                           Foreground="#808080"
+                           Margin="0,4,0,0"/>
+            </StackPanel>
+        </Border>
+
+        <!-- Action Buttons -->
+        <Border Grid.Row="3" Background="#252526" Padding="20,15">
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                <Button Content="Cancel" 
+                        Command="{Binding CancelCommand}"
+                        Width="100" 
+                        Height="32"
+                        Margin="0,0,10,0"
+                        Background="#3F3F46"
+                        Foreground="White"
+                        BorderThickness="0"
+                        Cursor="Hand"/>
+
+                <Button Content="Confirm Layout" 
+                        Command="{Binding ConfirmLayoutCommand}"
+                        IsEnabled="{Binding IsLayoutComplete}"
+                        Width="140" 
+                        Height="32"
+                        Background="#0E639C"
+                        Foreground="White"
+                        BorderThickness="0"
+                        FontWeight="SemiBold"
+                        Cursor="Hand">
+                    <Button.Style>
+                        <Style TargetType="Button">
+                            <Setter Property="Background" Value="#0E639C"/>
+                            <Style.Triggers>
+                                <Trigger Property="IsEnabled" Value="False">
+                                    <Setter Property="Background" Value="#3F3F46"/>
+                                    <Setter Property="Foreground" Value="#808080"/>
+                                </Trigger>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter Property="Background" Value="#1177BB"/>
+                                </Trigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Button.Style>
+                </Button>
+            </StackPanel>
+        </Border>
+    </Grid>
+</Window>

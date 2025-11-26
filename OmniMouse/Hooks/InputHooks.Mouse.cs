@@ -28,8 +28,9 @@ namespace OmniMouse.Hooks
             if (nCode >= 0 && _instance != null)
             {
                 var ms = Marshal.PtrToStructure<MSLLHOOKSTRUCT>(lParam);
-                
-                // DRY: Query role from UdpMouseTransmitter - single source of truth*
+
+                // Query role (still used to gate network send path), but edge detection
+                // can now occur while Receiver to allow claiming Sender dynamically.
                 var currentRole = GetCurrentRole();
 
                 switch ((int)wParam)
@@ -39,6 +40,8 @@ namespace OmniMouse.Hooks
                         if (IsInjectedMouse(ms.flags))
                         {
                             // Console.WriteLine($"[MOVE][Injected] ({ms.pt.x}, {ms.pt.y}) suppressed.");
+
+                            TryEdgeReturn(ms.pt.x, ms.pt.y);
                             break;
                         }
 
@@ -79,19 +82,38 @@ namespace OmniMouse.Hooks
                             //Console.WriteLine($"[HOOK][Suppress] PENDING for ({supX},{supY}), saw ({ms.pt.x},{ms.pt.y}). count={afterCount} (no decrement)");
                         }
 
-                        // Only process local mouse movement when we are the Sender**
-                        if (currentRole != ConnectionRole.Sender)
-                        {
-                            //Console.WriteLine($"[MOVE][Receiver] ({ms.pt.x}, {ms.pt.y}) - ignored (not Sender)");
-                            break;
-                        }
+                        // Previously we ignored movement entirely when not Sender.
+                        // In seamless mode we still invoke edge policy evaluation so a Receiver
+                        // can trigger a take-control (sender claim) via NetworkSwitchCoordinator.
+                        bool isSender = currentRole == ConnectionRole.Sender;
 
                         //role-gated send path: guard with send gate and re-check role inside
                         lock (_sendGate)
                         {
-                            if (GetCurrentRole() != ConnectionRole.Sender)
+                            if (!isSender && !_remoteStreaming)
                             {
-                                //Console.WriteLine($"[MOVE][Receiver] ({ms.pt.x}, {ms.pt.y}) - ignored (lost Sender during gate)");
+                                // EDGE CLAIM LOGIC (Receiver attempting to become Sender)
+                                TryEdgeClaim(ms.pt.x, ms.pt.y);
+                                // Evaluate edge switching while Receiver (existing path)
+                                if (_instance._switcher != null)
+                                {
+                                    _instance._switcher.OnMouseMove(ms.pt.x, ms.pt.y);
+                                }
+                                else
+                                {
+                                    // Debug: log when switcher is not available
+                                    if (!_loggedMissingSwitcher)
+                                    {
+                                        _loggedMissingSwitcher = true;
+                                        Console.WriteLine("[HOOK][Mouse][WARN] Receiver mode: switcher is null, cannot evaluate edge switching");
+                                    }
+                                }
+                                break; // no sending while Receiver (until streaming starts)
+                            }
+                            else if (GetCurrentRole() != ConnectionRole.Sender && _remoteStreaming)
+                            {
+                                // Lost sender role mid-stream; terminate streaming.
+                                EndRemoteStreaming();
                                 break;
                             }
 
@@ -114,6 +136,33 @@ namespace OmniMouse.Hooks
                                     // Send raw deltas (transmitter applies sentinel). We deliberately avoid
                                     // updating the baseline to the raw hook coordinates; instead we refresh from
                                     // the real cursor position after sending to keep future deltas accurate.
+                                    // Remote streaming release detection: accumulate opposite-direction movement
+                                    if (_remoteStreamingDirection.HasValue)
+                                    {
+                                        switch (_remoteStreamingDirection.Value)
+                                        {
+                                            case OmniMouse.Switching.Direction.Left: // exited via left edge; return by moving RIGHT (dx > 0)
+                                                _remoteStreamingReleaseAccum = dx > 0 ? _remoteStreamingReleaseAccum + dx : 0;
+                                                break;
+                                            case OmniMouse.Switching.Direction.Right: // exited via right edge; return by moving LEFT (dx < 0)
+                                                _remoteStreamingReleaseAccum = dx < 0 ? _remoteStreamingReleaseAccum + (-dx) : 0;
+                                                break;
+                                            case OmniMouse.Switching.Direction.Up: // exited via top; return by moving DOWN (dy > 0)
+                                                _remoteStreamingReleaseAccum = dy > 0 ? _remoteStreamingReleaseAccum + dy : 0;
+                                                break;
+                                            case OmniMouse.Switching.Direction.Down: // exited via bottom; return by moving UP (dy < 0)
+                                                _remoteStreamingReleaseAccum = dy < 0 ? _remoteStreamingReleaseAccum + (-dy) : 0;
+                                                break;
+                                        }
+                                        // if (_remoteStreamingReleaseAccum >= RemoteReleaseThresholdPixels)
+                                        // {
+                                        //     Console.WriteLine("[HOOK][Stream] Release threshold met; ending remote streaming.");
+                                        //     EndRemoteStreaming();
+                                        //     // Allow local input to resume; do not block.
+                                        //     break;
+                                        // }
+                                    }
+
                                     _instance._udpTransmitter.SendMouse(dx, dy, isDelta: true);
 
                                     // Refresh actual cursor position (it should be unchanged, but reconcile drift).
@@ -126,7 +175,11 @@ namespace OmniMouse.Hooks
                                     // CRITICAL: Return 1 to BLOCK this input locally
                                     // The mouse will appear stuck on PC1, but PC2 will move based on deltas
                                     // Console.WriteLine($"[MOVE][RemoteStream] Sent delta ({dx},{dy}), BLOCKING local input");
-                                    return new IntPtr(1);
+                                    if (_remoteStreaming)
+                                    {
+                                        return new IntPtr(1); // still streaming; block local input
+                                    }
+                                    // streaming ended this iteration; fall through allowing local input
                                 }
                                 else
                                 {
@@ -253,6 +306,119 @@ namespace OmniMouse.Hooks
             if (_instance != null)
                 return CallNextHookExImpl(_instance._mouseHook, nCode, wParam, lParam);
             return IntPtr.Zero;
+        }
+
+
+
+        // ---------------------------------------------------------
+        // NEW: Dedicated Method for Returning to Local Control
+        // ---------------------------------------------------------
+        private static void TryEdgeReturn(int x, int y)
+        {
+            // Get Local Bounds
+            if (_instance?._inputCoordinator == null) return;
+            var monitors = _instance._inputCoordinator.ScreenMap?.GetMonitorsSnapshot();
+            if (monitors == null || monitors.Count == 0) return;
+
+            int left = int.MaxValue, top = int.MaxValue;
+            int right = int.MinValue, bottom = int.MinValue;
+
+            foreach (var monitor in monitors)
+            {
+                if (monitor.OwnerClientId == _instance._inputCoordinator.SelfClientId)
+                {
+                    var bounds = monitor.LocalBounds;
+                    left = Math.Min(left, bounds.Left);
+                    top = Math.Min(top, bounds.Top);
+                    right = Math.Max(right, bounds.Right);
+                    bottom = Math.Max(bottom, bounds.Bottom);
+                }
+            }
+            if (left == int.MaxValue) return;
+
+            // Check if we hit the edges
+            bool hitRight = (right - x) <= EdgeThresholdPixels;
+            bool hitLeft = (x - left) <= EdgeThresholdPixels;
+            bool hitTop = (y - top) <= EdgeThresholdPixels;
+            bool hitBottom = (bottom - y) <= EdgeThresholdPixels;
+
+            // Simple logic: If we hit ANY edge while streaming, we likely want to return.
+            // You can make this stricter (e.g. only the edge facing the local user) if needed.
+            if (hitRight || hitLeft || hitTop || hitBottom)
+            {
+                Console.WriteLine("[HOOK][EdgeReturn] Edge hit detected during stream. Returning to local.");
+                EndRemoteStreaming();
+            }
+        }
+
+
+
+
+        private static void TryEdgeClaim(int x, int y)
+        {
+            if (_instance?._udpTransmitter is not UdpMouseTransmitter tx) return;
+            if (!tx.HandshakeComplete) return;
+            if (tx.CurrentRole != ConnectionRole.Receiver) return;
+            if (string.IsNullOrEmpty(RemotePeerClientId)) return;
+            if (_instance?._inputCoordinator == null) return;
+
+            // Use VirtualScreenMap to get the actual screen bounds
+            var monitors = _instance._inputCoordinator.ScreenMap?.GetMonitorsSnapshot();
+            if (monitors == null || monitors.Count == 0) return; // FIXED: Length -> Count
+
+            // Find the local monitor bounds (monitors owned by this client)
+            int left = int.MaxValue;
+            int top = int.MaxValue;
+            int right = int.MinValue;
+            int bottom = int.MinValue;
+
+            foreach (var monitor in monitors)
+            {
+                if (monitor.OwnerClientId == _instance._inputCoordinator.SelfClientId)
+                {
+                    var bounds = monitor.LocalBounds;
+                    left = Math.Min(left, bounds.Left);
+                    top = Math.Min(top, bounds.Top);
+                    right = Math.Max(right, bounds.Right);
+                    bottom = Math.Max(bottom, bounds.Bottom);
+                }
+            }
+
+            // If we couldn't find any monitors, bail out
+            if (left == int.MaxValue) return;
+
+            bool nearRight = (right - x) <= EdgeThresholdPixels;
+            bool nearLeft = (x - left) <= EdgeThresholdPixels;
+
+            // Assuming two-machine horizontal layout: claim when exiting toward peer.
+            if (nearRight)
+            {
+                Console.WriteLine("[HOOK][EdgeClaim] Right edge hit; attempting sender claim...");
+                BeginRemoteStreaming(OmniMouse.Switching.Direction.Right);
+                try
+                {
+                    tx.SendTakeControl(RemotePeerClientId!, x, y);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[HOOK][EdgeClaim] SendTakeControl failed: {ex.Message}");
+                    EndRemoteStreaming();
+                }
+            }
+            else if (nearLeft)
+            {
+                Console.WriteLine("[HOOK][EdgeClaim] Left edge hit; attempting sender claim...");
+                BeginRemoteStreaming(OmniMouse.Switching.Direction.Left);
+                try
+                {
+                    tx.SendTakeControl(RemotePeerClientId!, x, y);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[HOOK][EdgeClaim] SendTakeControl failed: {ex.Message}");
+                    EndRemoteStreaming();
+                }
+            }
         }
     }
 }

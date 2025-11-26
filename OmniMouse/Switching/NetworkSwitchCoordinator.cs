@@ -47,6 +47,7 @@ namespace OmniMouse.Switching
             Console.WriteLine($"[NetworkSwitchCoordinator] Switch: {e.FromMachine} -> {e.ToMachine}");
             Console.WriteLine($"  Reason: {e.Reason}, Direction: {e.Direction}");
             Console.WriteLine($"  Universal Point: ({e.UniversalCursorPoint.X}, {e.UniversalCursorPoint.Y})");
+            Console.WriteLine($"[NetworkSwitchCoordinator][DEBUG] Current transmitter role before SendTakeControl");
 
             try
             {
@@ -116,7 +117,7 @@ namespace OmniMouse.Switching
                 this.switcher.SetActiveMachine(e.ToMachine);
 
                 // Enable continuous remote streaming of local mouse moves until we switch back
-                InputHooks.BeginRemoteStreaming();
+                InputHooks.BeginRemoteStreaming(e.Direction);
 
                 Console.WriteLine($"[NetworkSwitchCoordinator] Sent take-control to {e.ToMachine}");
             }

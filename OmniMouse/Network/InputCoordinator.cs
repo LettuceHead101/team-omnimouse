@@ -16,6 +16,10 @@ namespace OmniMouse.Network
         private readonly UdpMouseTransmitter _udpService;
         private readonly string _selfClientId;
 
+        // Add public accessors for InputHooks to use
+        internal VirtualScreenMap ScreenMap => _screenMap;
+        internal string SelfClientId => _selfClientId;
+
         // Protects _globalMouseX/_globalMouseY/_currentActiveClientId/_lastMonitor
         private readonly object _coordinatorLock = new object();
 

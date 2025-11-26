@@ -51,6 +51,10 @@ namespace NetworkTestProject1.SwitchingTests
             {
                 LastTakeControl = (targetClientId, localX, localY);
             }
+
+            public void SendLayoutUpdate(int position, string machineId, string displayName) { }
+            public OmniMouse.Network.LayoutCoordinator GetLayoutCoordinator() => null!;
+            public string GetLocalMachineId() => "test-client";
         }
 
         [TestMethod]

@@ -476,6 +476,19 @@ namespace OmniMouse.Network
                                 }
                                 break;
 
+                            case MSG_LAYOUT_UPDATE:
+                                if (_remoteEndPoint != null && !remoteEP.Address.Equals(_remoteEndPoint.Address))
+                                {
+                                    Console.WriteLine($"[UDP][LayoutUpdate][DROP] from unexpected {remoteEP.Address}");
+                                    break;
+                                }
+
+                                if (data.Length > 1)
+                                {
+                                    HandleLayoutUpdate(data, 1);
+                                }
+                                break;
+
                             default:
                                 if (_remoteEndPoint != null && !remoteEP.Address.Equals(_remoteEndPoint.Address))
                                     break;
