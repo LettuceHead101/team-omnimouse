@@ -39,6 +39,7 @@ namespace OmniMouse.Hooks
 
         // One-time log to confirm hook entry
         private static bool _loggedFirstMouseCallback = false;
+        private static bool _loggedMissingSwitcher = false;
 
         // Track the message pump thread so we can stop it on uninstall
         private static uint _messageThreadId = 0;
@@ -59,16 +60,33 @@ namespace OmniMouse.Hooks
         // When true, we stream local WM_MOUSEMOVE events to the peer instead of
         // evaluating edge switching locally.
         private static volatile bool _remoteStreaming = false;
+        private static OmniMouse.Switching.Direction? _remoteStreamingDirection = null;
+        private static int _remoteStreamingReleaseAccum = 0; // accumulates opposite-direction movement attempts
+        private const int RemoteReleaseThresholdPixels = 40; // movement attempts needed to release control
+
+        // Edge detection config
+        private const int EdgeThresholdPixels = 2;
+        public static string? RemotePeerClientId { get; private set; }
+        public static void SetRemotePeer(string clientId) => RemotePeerClientId = clientId;
 
         public static void BeginRemoteStreaming()
         {
+            BeginRemoteStreaming(null);
+        }
+
+        public static void BeginRemoteStreaming(OmniMouse.Switching.Direction? direction)
+        {
             _remoteStreaming = true;
-            Console.WriteLine("[HOOK][Stream] Remote streaming ENABLED");
+            _remoteStreamingDirection = direction;
+            _remoteStreamingReleaseAccum = 0;
+            Console.WriteLine($"[HOOK][Stream] Remote streaming ENABLED (dir={direction})");
         }
 
         public static void EndRemoteStreaming()
         {
             _remoteStreaming = false;
+            _remoteStreamingDirection = null;
+            _remoteStreamingReleaseAccum = 0;
             Console.WriteLine("[HOOK][Stream] Remote streaming DISABLED");
         }
 

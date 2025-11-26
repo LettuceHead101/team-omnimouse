@@ -44,6 +44,9 @@ namespace OmniMouse.Network
         private const byte MSG_TAKE_CONTROL_ACK = 0x06;
         private const byte MSG_MOUSE_BUTTON = 0x07; // Mouse button down/up
         private const byte MSG_MOUSE_WHEEL = 0x08;  // Mouse wheel delta
+        private const byte MSG_LAYOUT_ANNOUNCE = 0x40;  // Machine announces position choice
+        private const byte MSG_LAYOUT_SYNC = 0x41;      // Full layout broadcast
+        private const byte MSG_LAYOUT_UPDATE = 0x42;    // Single machine position update
         
         // When |X| >= MOVE_MOUSE_RELATIVE && |Y| >= MOVE_MOUSE_RELATIVE, it's a relative delta
         // Actual delta = (value < 0 ? value + MOVE_MOUSE_RELATIVE : value - MOVE_MOUSE_RELATIVE)
@@ -69,6 +72,9 @@ namespace OmniMouse.Network
         // Events
         public event Action<ConnectionRole>? RoleChanged;
         public event Action<int, int>? TakeControlReceived;
+
+        // Seamless switching feature toggle (true = dynamic sender claim via edge detection)
+        public bool SeamlessMode { get; set; } = true;
 
         // Constructors
         public UdpMouseTransmitter()
@@ -257,6 +263,29 @@ namespace OmniMouse.Network
                     return _currentRole;
                 }
             }
+        }
+
+        // Add public read-only handshake status
+        public bool HandshakeComplete
+        {
+            get
+            {
+                lock (_roleLock) return _handshakeComplete;
+            }
+        }
+
+        // Optional helper: attempt local sender claim (direct role force)
+        public bool TryForceSender()
+        {
+            lock (_roleLock)
+            {
+                if (!_handshakeComplete) return false;
+                if (_currentRole == ConnectionRole.Sender) return true;
+                _currentRole = ConnectionRole.Sender;
+            }
+            Console.WriteLine("[UDP] Sender role claimed locally.");
+            RoleChanged?.Invoke(ConnectionRole.Sender);
+            return true;
         }
 
         [DllImport("user32.dll")]

@@ -3,6 +3,7 @@ using OmniMouse.MVVM;
 using OmniMouse.Network;
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Windows;
 using System.Windows.Input;
@@ -21,7 +22,9 @@ namespace OmniMouse.ViewModel
         private bool _isPeerConfirmed; // True once handshake/connectivity is confirmed
 
         private readonly List<string> _consoleLines = new();
-        private const int MaxConsoleLines = 20;
+        private const int MaxConsoleLines = 50;
+
+        private string? _primaryPeerId;
 
         public string ConsoleOutput 
         { 
@@ -61,12 +64,17 @@ namespace OmniMouse.ViewModel
         public ICommand StartAsSourceCommand { get; }
         public ICommand StartAsReceiverCommand { get; }
         public ICommand DisconnectCommand { get; }
+        public ICommand ShowLayoutCommand { get; }
+
+        private Views.LayoutSelectionView? _layoutWindow; // persistent modeless layout window
+        private bool _layoutDialogActive = false; // added: track active modal dialog
 
         public HomePageViewModel()
         {
             StartAsSourceCommand = new RelayCommand(ExecuteStartAsSource, CanExecuteConnect);
             StartAsReceiverCommand = new RelayCommand(ExecuteStartAsReceiver, CanExecuteConnect);
             DisconnectCommand = new RelayCommand(ExecuteDisconnect, CanExecuteDisconnect);
+            ShowLayoutCommand = new RelayCommand(_ => ShowOrCreateLayoutWindow(), _ => _udp?.LayoutCoordinator != null);
 
             App.ConsoleOutputReceived += OnConsoleOutputReceived;
         }
@@ -119,6 +127,13 @@ namespace OmniMouse.ViewModel
             _udp?.Disconnect();
             _udp = null;
 
+            // Close persistent layout window if open
+            if (_layoutWindow != null)
+            {
+                try { _layoutWindow.Close(); } catch { }
+                _layoutWindow = null;
+            }
+
             IsMouseSource = false;
             IsPeerConfirmed = false;
             IsConnected = false;
@@ -144,13 +159,20 @@ namespace OmniMouse.ViewModel
                 var topology = new OmniMouse.Switching.Win32ScreenTopology();
                 var mapper = new OmniMouse.Switching.DefaultCoordinateMapper();
 
-                // Use first remote host/IP if comma-separated, else the whole string
-                var remoteId = (RemoteHostIps ?? string.Empty).Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries);
-                var remote = remoteId.Length > 0 ? remoteId[0].Trim() : string.Empty;
-
-                var machines = string.IsNullOrWhiteSpace(remote)
-                    ? new[] { clientId }
-                    : new[] { clientId, remote };
+                // Get ordered machine IDs from layout coordinator after user selects positions
+                var layoutCoordinator = _udp.GetLayoutCoordinator();
+                string[] machines;
+                
+                if (layoutCoordinator != null && layoutCoordinator.CurrentLayout.Machines.Any(m => m.IsPositioned))
+                {
+                    // Use positions from layout coordinator (set via UI)
+                    machines = layoutCoordinator.CurrentLayout.GetOrderedMachineIds();
+                }
+                else
+                {
+                    // Fallback: just use local machine until layout is confirmed
+                    machines = new[] { clientId };
+                }
 
                 var layout = new OmniMouse.Switching.DefaultMachineLayout(machines, oneRow: true, wrapAround: false)
                 {
@@ -167,7 +189,8 @@ namespace OmniMouse.ViewModel
 
                 _switcher = new OmniMouse.Switching.MultiMachineSwitcher(topology, layout, policy, mapper);
                 _switcher.SetActiveMachine(clientId);
-                _switcher.UpdateMatrix(machines, oneRow: true, wrapAround: false);
+                
+                // UpdateMatrix will be called after layout selection confirms positions
                 _switchCoordinator = new OmniMouse.Switching.NetworkSwitchCoordinator(_switcher, udp, clientId);
                 _switcher.Start();
             }
@@ -234,22 +257,125 @@ namespace OmniMouse.ViewModel
 
                 WriteToConsole($"[UI][Handshake] Confirmed role: {role}");
 
-                // Align hooks with current role
-                if (becameSource)
+                // Install hooks for BOTH roles (edge detection needs to work for both Sender and Receiver)
+                if (_hooks == null && _udp != null)
                 {
-                    if (_hooks == null && _udp != null)
-                    {
-                        StartHooks(_udp);
-                        WriteToConsole("[UI][RoleConfirm] Sender: hooks installed/active.");
-                    }
+                    StartHooks(_udp);
+                    WriteToConsole($"[UI][RoleConfirm] {role}: hooks installed for edge detection.");
                 }
                 else
                 {
-                    // Keep hooks installed; InputHooks gates sending by role (Receiver ignores send path)
-                    // This avoids missing transitions due to uninstall/reinstall churn.
-                    WriteToConsole("[UI][RoleConfirm] Receiver: hooks installed; send path gated.");
+                    WriteToConsole($"[UI][RoleConfirm] {role}: hooks already installed.");
                 }
+
+                // After handshake completes, show layout selection dialog
+                ShowLayoutSelectionDialog();
             }));
+        }
+
+        private void ShowLayoutSelectionDialog()
+        {
+            if (_layoutDialogActive)
+            {
+                WriteToConsole("[UI][Layout] Dialog already active; suppressing duplicate.");
+                return;
+            }
+
+            // Suppress dialog if persistent window already open
+            if (_layoutWindow != null && _layoutWindow.IsVisible)
+            {
+                WriteToConsole("[UI][Layout] Persistent layout window open; using it instead of dialog.");
+                return;
+            }
+
+            if (_udp?.LayoutCoordinator == null)
+            {
+                WriteToConsole("[UI][Layout] Layout coordinator not initialized yet.");
+                return;
+            }
+
+            // Get local machine ID from the UDP transmitter
+            string localMachineId = _udp.GetLocalMachineId();
+            var viewModel = new LayoutSelectionViewModel(_udp.LayoutCoordinator, localMachineId);
+            var dialog = new Views.LayoutSelectionView(viewModel)
+            {
+                Owner = Application.Current.MainWindow
+            };
+            dialog.IsDialogInstance = true; // mark as modal instance
+
+            _layoutDialogActive = true;
+            bool? result = null;
+            try
+            {
+                result = dialog.ShowDialog();
+            }
+            finally
+            {
+                _layoutDialogActive = false;
+            }
+
+            if (result == true)
+            {
+                WriteToConsole("[UI][Layout] Layout confirmed. Edge detection active.");
+                if (_switcher != null && _udp?.GetLayoutCoordinator() != null)
+                {
+                    var orderedMachineIds = _udp.GetLayoutCoordinator()!.CurrentLayout.GetOrderedMachineIds();
+                    _switcher.UpdateMatrix(orderedMachineIds, oneRow: true, wrapAround: false);
+                    WriteToConsole($"[UI][Layout] Updated switcher with {orderedMachineIds.Length} machines: {string.Join(", ", orderedMachineIds)}");
+
+                    // Determine remote peer (first non-local id)
+                    var localId = _udp.GetLocalMachineId();
+                    _primaryPeerId = orderedMachineIds.FirstOrDefault(id => id != localId);
+                    if (!string.IsNullOrEmpty(_primaryPeerId))
+                    {
+                        InputHooks.SetRemotePeer(_primaryPeerId);
+                        WriteToConsole($"[UI][Layout] Remote peer set for edge claim: {_primaryPeerId}");
+                    }
+                    else
+                    {
+                        WriteToConsole("[UI][Layout] Warning: no remote peer found for edge claim.");
+                    }
+                }
+            }
+            else
+            {
+                WriteToConsole("[UI][Layout] Layout selection cancelled.");
+            }
+        }
+
+        private void ShowOrCreateLayoutWindow()
+        {
+            if (_udp?.LayoutCoordinator == null)
+            {
+                WriteToConsole("[UI][Layout] Cannot show layout window - coordinator not ready.");
+                return;
+            }
+
+            if (_layoutDialogActive)
+            {
+                WriteToConsole("[UI][Layout] Modal dialog active; not opening persistent window.");
+                return;
+            }
+
+            // Reuse existing window if still open
+            if (_layoutWindow != null && _layoutWindow.IsVisible)
+            {
+                _layoutWindow.Activate();
+                return;
+            }
+
+            var localId = _udp.GetLocalMachineId();
+            var vm = new LayoutSelectionViewModel(_udp.LayoutCoordinator, localId);
+            _layoutWindow = new Views.LayoutSelectionView(vm)
+            {
+                Owner = Application.Current.MainWindow,
+                ShowInTaskbar = true,
+                Topmost = false
+            };
+            // modeless: do NOT set IsDialogInstance
+            _layoutWindow.Closed += (s, e) => _layoutWindow = null;
+            _layoutWindow.Show();
+            WriteToConsole("[UI][Layout] Persistent layout window opened.");
         }
 
         private void WriteToConsole(string message)
