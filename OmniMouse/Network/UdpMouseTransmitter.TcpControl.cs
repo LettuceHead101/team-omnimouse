@@ -123,8 +123,7 @@ namespace OmniMouse.Network
                             var topology = new Win32ScreenTopology();
                             var bounds = topology.GetScreenConfiguration();
                             var mapper = new DefaultCoordinateMapper();
-                            var refBounds = mapper.GetReferenceBounds(isRelativeMode: false, isController: false,
-                                desktopBounds: bounds.DesktopBounds, primaryBounds: bounds.PrimaryScreenBounds);
+                            var refBounds = bounds.DesktopBounds; // Use full desktop instead of primary screen only                                        desktopBounds: bounds.DesktopBounds, primaryBounds: bounds.PrimaryScreenBounds);
                             var pixel = mapper.MapToPixel(new System.Drawing.Point(ux, uy), refBounds);
 
                             // End remote streaming since we're receiving control

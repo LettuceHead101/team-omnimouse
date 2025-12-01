@@ -63,6 +63,10 @@ namespace OmniMouse.Hooks
         private static OmniMouse.Switching.Direction? _remoteStreamingDirection = null;
         private static int _remoteStreamingReleaseAccum = 0; // accumulates opposite-direction movement attempts
         private const int RemoteReleaseThresholdPixels = 40; // movement attempts needed to release control
+        
+        // Track accumulated remote cursor position (summing deltas sent)
+        private static int _remoteCursorX = 0;
+        private static int _remoteCursorY = 0;
 
         // Edge detection config
         private const int EdgeThresholdPixels = 2;
@@ -79,7 +83,97 @@ namespace OmniMouse.Hooks
             _remoteStreaming = true;
             _remoteStreamingDirection = direction;
             _remoteStreamingReleaseAccum = 0;
-            Console.WriteLine($"[HOOK][Stream] Remote streaming ENABLED (dir={direction})");
+            
+            // Initialize remote cursor position in REMOTE coordinate space (not local!)
+            // We need to map the entry point based on which edge we crossed
+            if (GetCursorPos(out var cur) && !string.IsNullOrEmpty(RemotePeerClientId))
+            {
+                // Get remote machine's monitor bounds
+                var monitors = _instance?._inputCoordinator?.ScreenMap?.GetMonitorsSnapshot();
+                if (monitors != null && monitors.Count > 0)
+                {
+                    // Find remote machine's total bounds
+                    int remoteLeft = int.MaxValue, remoteTop = int.MaxValue;
+                    int remoteRight = int.MinValue, remoteBottom = int.MinValue;
+
+                    foreach (var monitor in monitors)
+                    {
+                        if (monitor.OwnerClientId == RemotePeerClientId)
+                        {
+                            // Use GlobalBounds to get virtual coordinate space bounds
+                            var gb = monitor.GlobalBounds;
+                            int gLeft = gb.X;
+                            int gTop = gb.Y;
+                            int gRight = gb.X + gb.Width;
+                            int gBottom = gb.Y + gb.Height;
+                            remoteLeft = Math.Min(remoteLeft, gLeft);
+                            remoteTop = Math.Min(remoteTop, gTop);
+                            remoteRight = Math.Max(remoteRight, gRight);
+                            remoteBottom = Math.Max(remoteBottom, gBottom);
+                        }
+                    }
+
+                    // Clamp entry Y/X to remote bounds
+                    int entryY = Math.Max(remoteTop, Math.Min(remoteBottom - 1, cur.y));
+                    int entryX = Math.Max(remoteLeft, Math.Min(remoteRight - 1, cur.x));
+
+                    // Map entry point based on exit direction
+                    if (remoteLeft != int.MaxValue && direction.HasValue)
+                    {
+                        switch (direction.Value)
+                        {
+                            case OmniMouse.Switching.Direction.Right:
+                                // Exited right edge, enter at left edge of remote screen
+                                _remoteCursorX = remoteLeft;
+                                _remoteCursorY = entryY;
+                                break;
+                            case OmniMouse.Switching.Direction.Left:
+                                // Exited left edge, enter at right edge of remote screen
+                                _remoteCursorX = remoteRight - 1;
+                                _remoteCursorY = entryY;
+                                break;
+                            case OmniMouse.Switching.Direction.Down:
+                                // Exited bottom edge, enter at top edge of remote screen
+                                _remoteCursorX = entryX;
+                                _remoteCursorY = remoteTop;
+                                break;
+                            case OmniMouse.Switching.Direction.Up:
+                                // Exited top edge, enter at bottom edge of remote screen
+                                _remoteCursorX = entryX;
+                                _remoteCursorY = remoteBottom - 1;
+                                break;
+                        }
+                        Console.WriteLine($"[HOOK][Stream] Remote streaming ENABLED (dir={direction}) - Remote cursor initialized to ({_remoteCursorX},{_remoteCursorY}) in remote space (bounds: L={remoteLeft},T={remoteTop},R={remoteRight},B={remoteBottom})");
+
+                        // Send absolute position to remote to ensure synchronization
+                        if (_instance?._udpTransmitter != null)
+                        {
+                            _instance._udpTransmitter.SendMouse(_remoteCursorX, _remoteCursorY, isDelta: false);
+                            Console.WriteLine($"[HOOK][Stream] Sent absolute position ({_remoteCursorX},{_remoteCursorY}) to remote for sync");
+                        }
+                    }
+                    else
+                    {
+                        // Fallback: no remote bounds found or no direction
+                        _remoteCursorX = entryX;
+                        _remoteCursorY = entryY;
+                        Console.WriteLine($"[HOOK][Stream] Remote streaming ENABLED (dir={direction}) - WARNING: Using local coordinates as fallback ({_remoteCursorX},{_remoteCursorY})");
+                    }
+                }
+                else
+                {
+                    // No monitors available
+                    _remoteCursorX = cur.x;
+                    _remoteCursorY = cur.y;
+                    Console.WriteLine($"[HOOK][Stream] Remote streaming ENABLED (dir={direction}) - WARNING: No monitors available, using local coords ({_remoteCursorX},{_remoteCursorY})");
+                }
+            }
+            else
+            {
+                _remoteCursorX = 0;
+                _remoteCursorY = 0;
+                Console.WriteLine($"[HOOK][Stream] Remote streaming ENABLED (dir={direction}) - WARNING: No cursor position or remote peer available");
+            }
         }
 
         public static void EndRemoteStreaming()
@@ -87,7 +181,16 @@ namespace OmniMouse.Hooks
             _remoteStreaming = false;
             _remoteStreamingDirection = null;
             _remoteStreamingReleaseAccum = 0;
+            _remoteCursorX = 0;
+            _remoteCursorY = 0;
             Console.WriteLine("[HOOK][Stream] Remote streaming DISABLED");
+            
+            // Reset to Receiver role so we can initiate another edge crossing
+            if (_instance?._udpTransmitter is UdpMouseTransmitter tx)
+            {
+                tx.SetLocalRole(ConnectionRole.Receiver);
+                Console.WriteLine("[HOOK][Stream] Role reset to Receiver - ready for next edge crossing");
+            }
         }
 
         public static void SuppressNextMoveFrom(int x, int y)
@@ -261,14 +364,17 @@ namespace OmniMouse.Hooks
             var input = new INPUT
             {
                 type = INPUT_MOUSE,
-                mi = new MOUSEINPUT
+                u = new INPUT_UNION
                 {
-                    dx = deltaX,
-                    dy = deltaY,
-                    mouseData = 0,
-                    dwFlags = MOUSEEVENTF_MOVE, // Relative movement (NOT absolute)
-                    time = 0,
-                    dwExtraInfo = IntPtr.Zero
+                    mi = new MOUSEINPUT
+                    {
+                        dx = deltaX,
+                        dy = deltaY,
+                        mouseData = 0,
+                        dwFlags = MOUSEEVENTF_MOVE, // Relative movement (NOT absolute)
+                        time = 0,
+                        dwExtraInfo = IntPtr.Zero
+                    }
                 }
             };
 
@@ -303,14 +409,17 @@ namespace OmniMouse.Hooks
             var input = new INPUT
             {
                 type = INPUT_MOUSE,
-                mi = new MOUSEINPUT
+                u = new INPUT_UNION
                 {
-                    dx = 0,
-                    dy = 0,
-                    mouseData = 0,
-                    dwFlags = flags,
-                    time = 0,
-                    dwExtraInfo = IntPtr.Zero
+                    mi = new MOUSEINPUT
+                    {
+                        dx = 0,
+                        dy = 0,
+                        mouseData = 0,
+                        dwFlags = flags,
+                        time = 0,
+                        dwExtraInfo = IntPtr.Zero
+                    }
                 }
             };
 
@@ -331,14 +440,17 @@ namespace OmniMouse.Hooks
             var input = new INPUT
             {
                 type = INPUT_MOUSE,
-                mi = new MOUSEINPUT
+                u = new INPUT_UNION
                 {
-                    dx = 0,
-                    dy = 0,
-                    mouseData = delta,
-                    dwFlags = MOUSEEVENTF_WHEEL,
-                    time = 0,
-                    dwExtraInfo = IntPtr.Zero
+                    mi = new MOUSEINPUT
+                    {
+                        dx = 0,
+                        dy = 0,
+                        mouseData = delta,
+                        dwFlags = MOUSEEVENTF_WHEEL,
+                        time = 0,
+                        dwExtraInfo = IntPtr.Zero
+                    }
                 }
             };
 

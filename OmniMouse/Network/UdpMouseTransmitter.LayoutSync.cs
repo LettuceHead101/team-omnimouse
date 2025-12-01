@@ -85,6 +85,9 @@ namespace OmniMouse.Network
                 _udpClient.Send(packet, packet.Length, _peerEndPoint);
 
                 Console.WriteLine($"[UdpMouse][Layout] Sent layout update: {displayName} at position {position}");
+
+                // Log consolidated layout after local update
+                this.DumpLayoutSummary("[UdpMouse][Layout] Layout after local position update");
             }
             catch (Exception ex)
             {
@@ -123,6 +126,9 @@ namespace OmniMouse.Network
                 Console.WriteLine($"[UdpMouse][Layout] Received layout update: {displayName} at position {position}");
 
                 _layoutCoordinator.ApplyRemoteMachineUpdate(machineId, position, displayName);
+
+                // Log consolidated layout after remote update
+                this.DumpLayoutSummary("[UdpMouse][Layout] Layout after remote position update");
             }
             catch (Exception ex)
             {

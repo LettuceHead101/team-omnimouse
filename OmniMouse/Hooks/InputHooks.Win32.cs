@@ -127,11 +127,16 @@ namespace OmniMouse.Hooks
         private const int MOUSEEVENTF_WHEEL = 0x0800;
         private const int MOUSEEVENTF_ABSOLUTE = 0x8000;
 
+        // Keyboard event flags
+        private const int KEYEVENTF_EXTENDEDKEY = 0x0001;
+        private const int KEYEVENTF_KEYUP = 0x0002;
+        private const int KEYEVENTF_SCANCODE = 0x0008;
+
         [StructLayout(LayoutKind.Sequential)]
         private struct INPUT
         {
             public int type;
-            public MOUSEINPUT mi;
+            public INPUT_UNION u;
         }
 
         [StructLayout(LayoutKind.Sequential)]
@@ -144,5 +149,26 @@ namespace OmniMouse.Hooks
             public int time;
             public IntPtr dwExtraInfo;
         }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct KEYBDINPUT
+        {
+            public ushort wVk;
+            public ushort wScan;
+            public int dwFlags;
+            public int time;
+            public IntPtr dwExtraInfo;
+        }
+
+        [StructLayout(LayoutKind.Explicit)]
+        private struct INPUT_UNION
+        {
+            [FieldOffset(0)]
+            public MOUSEINPUT mi;
+            [FieldOffset(0)]
+            public KEYBDINPUT ki;
+        }
+
+
     }
 }

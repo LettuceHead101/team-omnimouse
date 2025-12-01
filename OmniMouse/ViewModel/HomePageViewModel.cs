@@ -68,6 +68,7 @@ namespace OmniMouse.ViewModel
 
         private Views.LayoutSelectionView? _layoutWindow; // persistent modeless layout window
         private bool _layoutDialogActive = false; // added: track active modal dialog
+        private bool _layoutConfigured = false; // <--- ADD THIS FLAG
 
         public HomePageViewModel()
         {
@@ -150,6 +151,9 @@ namespace OmniMouse.ViewModel
             
             // Discover local monitors and add them to the map
             PopulateLocalMonitors(map, clientId);
+            
+            // Register the screen map with UDP transmitter for monitor synchronization
+            udp.RegisterLocalScreenMap(map, clientId);
             
             var inputCoordinator = new InputCoordinator(map, udp, clientId);
             
@@ -268,8 +272,10 @@ namespace OmniMouse.ViewModel
                     WriteToConsole($"[UI][RoleConfirm] {role}: hooks already installed.");
                 }
 
-                // After handshake completes, show layout selection dialog
-                ShowLayoutSelectionDialog();
+                if (!_layoutConfigured) // <--- ADD CHECK
+                {
+                    ShowLayoutSelectionDialog();
+                }
             }));
         }
 
@@ -316,6 +322,8 @@ namespace OmniMouse.ViewModel
 
             if (result == true)
             {
+                _layoutConfigured = true; // setting the flag to true here so it doesn't pop up again on repeated calls
+
                 WriteToConsole("[UI][Layout] Layout confirmed. Edge detection active.");
                 if (_switcher != null && _udp?.GetLayoutCoordinator() != null)
                 {
@@ -429,6 +437,7 @@ namespace OmniMouse.ViewModel
             IsMouseSource = false;
             IsPeerConfirmed = false;
             IsConnected = false;
+            _layoutConfigured = false; // setting the flag to true here so it doesn't pop up again on repeated calls
         }
 
         public string HostIp
