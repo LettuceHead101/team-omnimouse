@@ -40,5 +40,14 @@ namespace OmniMouse.Network
 
         // Request the target client to take control at the specified local coordinates.
         void SendTakeControl(string targetClientId, int localX, int localY);
+
+        // Send layout position update to peers.
+        void SendLayoutUpdate(int position, string machineId, string displayName);
+
+        // Get the layout coordinator instance
+        LayoutCoordinator? GetLayoutCoordinator();
+
+        // Get the local machine ID
+        string GetLocalMachineId();
     }
 }

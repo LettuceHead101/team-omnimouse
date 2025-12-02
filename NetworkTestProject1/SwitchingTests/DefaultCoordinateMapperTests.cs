@@ -32,12 +32,12 @@ namespace NetworkTestProject1.Network
             Assert.AreEqual(new Point(0, 0), p0);
 
             var p50 = _mapper.MapToUniversal(new Point(50, 50), bounds);
-            // 50 * 65535 / 100 = 32767
-            Assert.AreEqual(new Point(32767, 32767), p50);
+            // 50 * 65535 / 100 = 32767.5, which rounds to 32768
+            Assert.AreEqual(new Point(32768, 32768), p50);
 
             var p99 = _mapper.MapToUniversal(new Point(99, 99), bounds);
-            // 99 * 65535 / 100 = 64879
-            Assert.AreEqual(new Point(64879, 64879), p99);
+            // 99 * 65535 / 100 = 64879.65, which rounds to 64880
+            Assert.AreEqual(new Point(64880, 64880), p99);
         }
 
         [TestMethod]
@@ -65,8 +65,8 @@ namespace NetworkTestProject1.Network
 
             var uni = _mapper.MapToUniversal(p, bounds);
 
-            // (110-10) * 65535 / 200 = 32767
-            Assert.AreEqual(new Point(32767, 32767), uni);
+            // (110-10) * 65535 / 200 = 32767.5, which rounds to 32768
+            Assert.AreEqual(new Point(32768, 32768), uni);
         }
 
         [TestMethod]

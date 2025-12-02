@@ -44,6 +44,10 @@ namespace OmniMouse.Network
         private const byte MSG_TAKE_CONTROL_ACK = 0x06;
         private const byte MSG_MOUSE_BUTTON = 0x07; // Mouse button down/up
         private const byte MSG_MOUSE_WHEEL = 0x08;  // Mouse wheel delta
+        private const byte MSG_LAYOUT_ANNOUNCE = 0x40;  // Machine announces position choice
+        private const byte MSG_LAYOUT_SYNC = 0x41;      // Full layout broadcast
+        private const byte MSG_LAYOUT_UPDATE = 0x42;    // Single machine position update
+        private const byte MSG_MONITOR_INFO = 0x43;     // Monitor information exchange
         
         // When |X| >= MOVE_MOUSE_RELATIVE && |Y| >= MOVE_MOUSE_RELATIVE, it's a relative delta
         // Actual delta = (value < 0 ? value + MOVE_MOUSE_RELATIVE : value - MOVE_MOUSE_RELATIVE)
@@ -63,12 +67,23 @@ namespace OmniMouse.Network
         // Registry to map known client IDs to endpoints
         private readonly Dictionary<string, IPEndPoint> _clientEndpoints = new(StringComparer.Ordinal);
         private readonly Dictionary<string, TcpClient> _tcpConnections = new();
+        
+        // Store local monitors to send to peer after handshake
+        private VirtualScreenMap? _localScreenMap;
+        private string? _localClientId;
         private readonly object _tcpLock = new object();
         private const int TcpControlPort = 5001; // Separate port for TCP control messages
+        
+        // Queue for monitor packets that arrive before screen map is ready
+        private readonly Queue<(byte[] data, int offset, IPEndPoint source)> _pendingMonitorPackets = new();
+        private readonly object _monitorSyncLock = new object();
 
         // Events
         public event Action<ConnectionRole>? RoleChanged;
         public event Action<int, int>? TakeControlReceived;
+
+        // Seamless switching feature toggle (true = dynamic sender claim via edge detection)
+        public bool SeamlessMode { get; set; } = true;
 
         // Constructors
         public UdpMouseTransmitter()
@@ -90,6 +105,44 @@ namespace OmniMouse.Network
                 _clientEndpoints[clientId] = endpoint;
             }
             Console.WriteLine($"[UDP] Registered endpoint for {clientId} -> {endpoint.Address}:{endpoint.Port}");
+        }
+        
+        /// <summary>
+        /// Registers the local screen map so monitors can be sent to peer after handshake.
+        /// </summary>
+        public void RegisterLocalScreenMap(VirtualScreenMap screenMap, string clientId)
+        {
+            _localScreenMap = screenMap ?? throw new ArgumentNullException(nameof(screenMap));
+            _localClientId = clientId ?? throw new ArgumentNullException(nameof(clientId));
+            Console.WriteLine($"[UDP] Registered local screen map with {screenMap.GetMonitorsSnapshot().Count} monitors for clientId={clientId}");
+
+            // Emit consolidated layout summary immediately after local registration
+            this.DumpLayoutSummary("[UDP][MonitorSync] Layout after local monitors registered");
+
+            // Process any queued monitor packets that arrived before screen map was ready
+            lock (_monitorSyncLock)
+            {
+                if (_pendingMonitorPackets.Count > 0)
+                {
+                    Console.WriteLine($"[UDP][MonitorSync] Processing {_pendingMonitorPackets.Count} queued monitor packet(s)");
+                    while (_pendingMonitorPackets.Count > 0)
+                    {
+                        var (data, offset, source) = _pendingMonitorPackets.Dequeue();
+                        HandleMonitorInfo(data, offset);
+                    }
+                }
+            }
+
+            // If handshake already completed, attempt to send monitor info now (previous attempt may have been skipped).
+            bool ready;
+            lock (_roleLock) ready = _handshakeComplete;
+            if (ready)
+            {
+                Console.WriteLine("[UDP][MonitorSync] Handshake complete; sending monitors after late registration.");
+                try { SendMonitorInfo(); } catch (Exception ex) { Console.WriteLine($"[UDP][MonitorSync] Deferred send failed: {ex.Message}"); }
+                // Layout after sending local monitors to peer (no change locally, but helpful log)
+                this.DumpLayoutSummary("[UDP][MonitorSync] Layout after sending local monitors to peer");
+            }
         }
 
         public void UnregisterClientEndpoint(string clientId)
@@ -257,6 +310,29 @@ namespace OmniMouse.Network
                     return _currentRole;
                 }
             }
+        }
+
+        // Add public read-only handshake status
+        public bool HandshakeComplete
+        {
+            get
+            {
+                lock (_roleLock) return _handshakeComplete;
+            }
+        }
+
+        // Optional helper: attempt local sender claim (direct role force)
+        public bool TryForceSender()
+        {
+            lock (_roleLock)
+            {
+                if (!_handshakeComplete) return false;
+                if (_currentRole == ConnectionRole.Sender) return true;
+                _currentRole = ConnectionRole.Sender;
+            }
+            Console.WriteLine("[UDP] Sender role claimed locally.");
+            RoleChanged?.Invoke(ConnectionRole.Sender);
+            return true;
         }
 
         [DllImport("user32.dll")]

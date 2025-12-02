@@ -147,8 +147,9 @@ namespace OmniMouse.Network
                         Console.WriteLine($"[UDP] Remote endpoint learned: {_remoteEndPoint.Address}:{_remoteEndPoint.Port}");
                     }
 
-                    var senderIsLocal = _localLowestIpV4 != null && (CompareIPv4(localId, initiatorLocalIp) <= 0);
-                    negotiatedLocalRole = senderIsLocal ? ConnectionRole.Sender : ConnectionRole.Receiver;
+                    // Seamless mode: initial handshake no longer assigns Sender based on IP.
+                    // All parties start as Receiver; first edge transition will claim Sender locally.
+                    negotiatedLocalRole = ConnectionRole.Receiver;
 
                     sendEndpoint = _remoteEndPoint;
                 }
@@ -185,7 +186,16 @@ namespace OmniMouse.Network
                     _handshakeComplete = true;
                 }
 
+                // Initialize layout coordinator after handshake completes
+                var localEp = _udpClient?.Client.LocalEndPoint as IPEndPoint;
+                var localMachineId = $"{localEp?.Address}:{localEp?.Port}";
+                var remoteMachineId = $"{sendEndpoint.Address}:{sendEndpoint.Port}";
+                InitializeLayoutCoordinator(localMachineId, remoteMachineId);
+
                 RoleChanged?.Invoke(negotiatedLocalRole);
+                
+                // Send monitor information to peer after handshake completes
+                SendMonitorInfo();
             }
             catch (Exception ex)
             {
@@ -240,8 +250,8 @@ namespace OmniMouse.Network
             }
 
             var localId = _localLowestIpV4 ?? IPAddress.Parse("0.0.0.0");
-            var senderShouldBeLocal = _localLowestIpV4 != null && (CompareIPv4(localId, responderLocalIp) <= 0);
-            var negotiatedLocalRole = senderShouldBeLocal ? ConnectionRole.Sender : ConnectionRole.Receiver;
+            // Seamless mode accept: keep local role Receiver. Role claim happens via edge detection.
+            var negotiatedLocalRole = ConnectionRole.Receiver;
 
             lock (_roleLock)
             {
@@ -253,7 +263,18 @@ namespace OmniMouse.Network
 
             CancelHandshakeTimer();
 
+            // Initialize layout coordinator after handshake completes
+            var localEp = _udpClient?.Client.LocalEndPoint as IPEndPoint;
+            var localMachineId = $"{localEp?.Address}:{localEp?.Port}";
+            var remoteMachineId = $"{_remoteEndPoint.Address}:{_remoteEndPoint.Port}";
+            InitializeLayoutCoordinator(localMachineId, remoteMachineId);
+
             RoleChanged?.Invoke(negotiatedLocalRole);
+            
+            // Note: SendMonitorInfo will be called when RegisterLocalScreenMap is invoked
+            // (after hooks are initialized), avoiding race condition where peer receives
+            // monitors before their screen map is ready.e initialized), avoiding race condition where peer receives
+            // monitors before their screen map is ready.
         }
 
         private static long RandomNonce()

@@ -458,8 +458,7 @@ namespace OmniMouse.Network
                                         var topology = new OmniMouse.Switching.Win32ScreenTopology();
                                         var bounds = topology.GetScreenConfiguration();
                                         var mapper = new OmniMouse.Switching.DefaultCoordinateMapper();
-                                        var refBounds = mapper.GetReferenceBounds(isRelativeMode: false, isController: false,
-                                            desktopBounds: bounds.DesktopBounds, primaryBounds: bounds.PrimaryScreenBounds);
+                                        var refBounds = bounds.DesktopBounds; // Use full desktop instead of primary screen only
                                         var pixel = mapper.MapToPixel(new System.Drawing.Point(ux, uy), refBounds);
 
                                         // End remote streaming since we're receiving control
@@ -473,6 +472,40 @@ namespace OmniMouse.Network
                                     {
                                         Console.WriteLine($"[UDP][TakeControl] Mapping failed: {mapEx.Message}");
                                     }
+                                }
+                                break;
+
+                            case MSG_LAYOUT_UPDATE:
+                                if (_remoteEndPoint != null && !remoteEP.Address.Equals(_remoteEndPoint.Address))
+                                {
+                                    Console.WriteLine($"[UDP][LayoutUpdate][DROP] from unexpected {remoteEP.Address}");
+                                    break;
+                                }
+
+                                if (data.Length > 1)
+                                {
+                                    HandleLayoutUpdate(data, 1);
+                                }
+                                break;
+
+                            case MSG_KEYBOARD_DOWN:
+                                HandleKeyboardDown(data, remoteEP);
+                                break;
+
+                            case MSG_KEYBOARD_UP:
+                                HandleKeyboardUp(data, remoteEP);
+                                break;
+
+                            case MSG_MONITOR_INFO:
+                                if (_remoteEndPoint != null && !remoteEP.Address.Equals(_remoteEndPoint.Address))
+                                {
+                                    Console.WriteLine($"[UDP][MonitorInfo][DROP] from unexpected {remoteEP.Address}");
+                                    break;
+                                }
+
+                                if (data.Length > 1)
+                                {
+                                    HandleMonitorInfo(data, 1);
                                 }
                                 break;
 
