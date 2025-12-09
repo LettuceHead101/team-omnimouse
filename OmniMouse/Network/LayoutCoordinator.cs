@@ -105,6 +105,38 @@ namespace OmniMouse.Network
         }
 
         /// <summary>
+        /// Sets any machine's grid position and broadcasts the update.
+        /// </summary>
+        public void SetMachineGridPosition(string machineId, int gridX, int gridY)
+        {
+            Console.WriteLine($"[LayoutCoordinator] Setting grid position for {machineId} to [{gridX},{gridY}]");
+
+            var machine = _currentLayout.Machines.FirstOrDefault(m => m.MachineId == machineId);
+            if (machine == null)
+            {
+                Console.WriteLine($"[LayoutCoordinator] ERROR: Machine {machineId} not found in layout!");
+                return;
+            }
+
+            // Check if grid position is already taken
+            var conflict = _currentLayout.GetMachineAtGridPosition(gridX, gridY);
+            if (conflict != null && conflict.MachineId != machineId)
+            {
+                Console.WriteLine($"[LayoutCoordinator] WARNING: Grid position [{gridX},{gridY}] occupied by {conflict.DisplayName}");
+                return;
+            }
+
+            machine.GridX = gridX;
+            machine.GridY = gridY;
+            _currentLayout.LastUpdateTimestamp = DateTime.UtcNow;
+
+            // Broadcast the specific machine's position update to all peers
+            BroadcastMachineGridUpdate(machine);
+
+            OnLayoutChanged($"{machine.DisplayName} grid position set to [{gridX},{gridY}]");
+        }
+
+        /// <summary>
         /// Broadcasts a specific machine's position update to all connected peers.
         /// </summary>
         private void BroadcastMachineUpdate(ConnectedMachine machine)
@@ -118,6 +150,22 @@ namespace OmniMouse.Network
             // Send layout update via UDP transmitter (works for both local and peer machines)
             _transmitter.SendLayoutUpdate(machine.Position, machine.MachineId, machine.DisplayName);
             Console.WriteLine($"[LayoutCoordinator] Broadcast position update - {machine.DisplayName} at position {machine.Position}");
+        }
+
+        /// <summary>
+        /// Broadcasts a specific machine's grid position update to all connected peers.
+        /// </summary>
+        private void BroadcastMachineGridUpdate(ConnectedMachine machine)
+        {
+            if (machine.GridX < 0 || machine.GridY < 0)
+            {
+                Console.WriteLine($"[LayoutCoordinator] Skipping broadcast - machine {machine.DisplayName} not positioned in grid");
+                return;
+            }
+
+            // Send grid layout update via UDP transmitter
+            _transmitter.SendGridLayoutUpdate(machine.MachineId, machine.DisplayName, machine.GridX, machine.GridY);
+            Console.WriteLine($"[LayoutCoordinator] Broadcast grid position update - {machine.DisplayName} at [{machine.GridX},{machine.GridY}]");
         }
 
         /// <summary>
@@ -180,6 +228,36 @@ namespace OmniMouse.Network
             _currentLayout.LastUpdateTimestamp = DateTime.UtcNow;
 
             OnLayoutChanged($"{displayName} moved to position {position}");
+        }
+
+        /// <summary>
+        /// Applies a single machine grid position update from a peer.
+        /// </summary>
+        public void ApplyRemoteGridMachineUpdate(string machineId, string displayName, int gridX, int gridY)
+        {
+            Console.WriteLine($"[LayoutCoordinator] Remote grid update: {machineId} -> [{gridX},{gridY}]");
+            var machine = _currentLayout.Machines.FirstOrDefault(m => m.MachineId == machineId);
+            if (machine != null)
+            {
+                machine.GridX = gridX;
+                machine.GridY = gridY;
+                machine.DisplayName = displayName;
+            }
+            else
+            {
+                _currentLayout.Machines.Add(new ConnectedMachine
+                {
+                    MachineId = machineId,
+                    DisplayName = displayName,
+                    GridX = gridX,
+                    GridY = gridY,
+                    IsLocal = false
+                });
+            }
+
+            _currentLayout.LastUpdateTimestamp = DateTime.UtcNow;
+
+            OnLayoutChanged($"{displayName} moved to grid position [{gridX},{gridY}]");
         }
 
         /// <summary>

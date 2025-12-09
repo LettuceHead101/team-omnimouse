@@ -5,8 +5,8 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d"
         Title="Configure PC Layout" 
-        Height="400" 
-        Width="700"
+        Height="550" 
+        Width="900"
         WindowStartupLocation="CenterScreen"
         ResizeMode="NoResize"
         Background="#1E1E1E">
@@ -18,10 +18,10 @@
             <Setter Property="BorderBrush" Value="#3F3F46"/>
             <Setter Property="BorderThickness" Value="1"/>
             <Setter Property="CornerRadius" Value="4"/>
-            <Setter Property="Padding" Value="12"/>
-            <Setter Property="Margin" Value="8"/>
-            <Setter Property="MinWidth" Value="150"/>
-            <Setter Property="MinHeight" Value="80"/>
+            <Setter Property="Padding" Value="8"/>
+            <Setter Property="Margin" Value="4"/>
+            <Setter Property="MinWidth" Value="120"/>
+            <Setter Property="MinHeight" Value="70"/>
             <Style.Triggers>
                 <Trigger Property="IsMouseOver" Value="True">
                     <Setter Property="BorderBrush" Value="#007ACC"/>
@@ -48,9 +48,9 @@
             <Setter Property="BorderBrush" Value="#3F3F46"/>
             <Setter Property="BorderThickness" Value="2"/>
             <Setter Property="CornerRadius" Value="4"/>
-            <Setter Property="Margin" Value="8"/>
-            <Setter Property="MinWidth" Value="150"/>
-            <Setter Property="MinHeight" Value="80"/>
+            <Setter Property="Margin" Value="4"/>
+            <Setter Property="MinWidth" Value="120"/>
+            <Setter Property="MinHeight" Value="70"/>
         </Style>
 
         <BooleanToVisibilityConverter x:Key="BoolToVis"/>
@@ -67,26 +67,101 @@
         <!-- Header -->
         <Border Grid.Row="0" Background="#2D2D30" Padding="20,15">
             <StackPanel>
-                <TextBlock Text="Configure PC Layout" 
+                <TextBlock Text="Configure PC Layout (2x2 Grid)" 
                            FontSize="20" 
                            FontWeight="SemiBold" 
                            Foreground="White"/>
-                <TextBlock Text="Arrange your PC position relative to other connected machines" 
-                           FontSize="12" 
+                <TextBlock Text="Drag machines from the Available Machines list to the grid below" 
+                           FontSize="13" 
                            Foreground="#CCCCCC" 
                            Margin="0,5,0,0"/>
             </StackPanel>
         </Border>
 
-        <!-- Layout Grid -->
-        <ScrollViewer Grid.Row="1" 
-                      HorizontalScrollBarVisibility="Auto" 
-                      VerticalScrollBarVisibility="Disabled"
-                      Margin="20">
-            <ItemsControl x:Name="LayoutGrid" ItemsSource="{Binding Machines}">
+        <!-- Main Content Area: Available Machines + Grid -->
+        <Grid Grid.Row="1" Margin="20">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="1*"/>
+                <ColumnDefinition Width="2*"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- Left: Available Machines -->
+            <Border Grid.Column="0" Background="#252526" BorderBrush="#3F3F46" BorderThickness="1" CornerRadius="4" Margin="0,0,10,0" Padding="15">
+                <StackPanel>
+                    <TextBlock Text="Available Machines" 
+                               FontSize="16" 
+                               FontWeight="SemiBold" 
+                               Foreground="White" 
+                               Margin="0,0,0,15"/>
+                    
+                    <ItemsControl ItemsSource="{Binding UnpositionedMachines}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border Background="#0E639C" 
+                                        BorderBrush="#1177BB" 
+                                        BorderThickness="1" 
+                                        CornerRadius="4" 
+                                        Padding="10" 
+                                        Margin="0,0,0,8"
+                                        Cursor="Hand"
+                                        MouseLeftButtonDown="OnMachineMouseDown">
+                                    <Border.Style>
+                                        <Style TargetType="Border">
+                                            <Style.Triggers>
+                                                <Trigger Property="IsMouseOver" Value="True">
+                                                    <Setter Property="Background" Value="#1177BB"/>
+                                                    <Setter Property="BorderBrush" Value="#1890FF"/>
+                                                </Trigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Border.Style>
+                                    <StackPanel>
+                                        <Border CornerRadius="2" Padding="6,3" HorizontalAlignment="Left" Margin="0,0,0,8">
+                                            <Border.Style>
+                                                <Style TargetType="Border">
+                                                    <Setter Property="Background" Value="#FFD700"/>
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding IsLocal}" Value="False">
+                                                            <Setter Property="Background" Value="#888888"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </Border.Style>
+                                            <TextBlock Text="{Binding TypeDisplay}" 
+                                                       FontSize="11" 
+                                                       FontWeight="Bold" 
+                                                       Foreground="White"/>
+                                        </Border>
+                                        <TextBlock Text="{Binding DisplayName}" 
+                                                   FontSize="14" 
+                                                   FontWeight="SemiBold" 
+                                                   Foreground="White" 
+                                                   TextWrapping="Wrap"/>
+                                        <TextBlock Text="Drag to grid →" 
+                                                   FontSize="11" 
+                                                   Foreground="#CCCCCC" 
+                                                   Margin="0,4,0,0"/>
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+            </Border>
+
+            <!-- Right: Layout Grid (2x2) -->
+            <Border Grid.Column="1" Background="#252526" BorderBrush="#3F3F46" BorderThickness="1" CornerRadius="4" Padding="15">
+                <StackPanel>
+                    <TextBlock Text="2x2 Grid Layout" 
+                               FontSize="16" 
+                               FontWeight="SemiBold" 
+                               Foreground="White" 
+                               Margin="0,0,0,15"/>
+                    
+                    <ItemsControl x:Name="LayoutGrid" ItemsSource="{Binding GridSlots}">
                 <ItemsControl.ItemsPanel>
                     <ItemsPanelTemplate>
-                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center"/>
+                        <UniformGrid Rows="2" Columns="2"/>
                     </ItemsPanelTemplate>
                 </ItemsControl.ItemsPanel>
                 <ItemsControl.ItemTemplate>
@@ -140,7 +215,7 @@
                                     <Border CornerRadius="2"
                                             Padding="4,2"
                                             HorizontalAlignment="Left"
-                                            Margin="0,0,0,8">
+                                            Margin="0,0,0,6">
                                         <Border.Style>
                                             <Style TargetType="Border">
                                                 <Setter Property="Background" Value="#666666"/>
@@ -152,7 +227,7 @@
                                             </Style>
                                         </Border.Style>
                                         <TextBlock Text="{Binding TypeDisplay}" 
-                                                 FontSize="10" 
+                                                 FontSize="9" 
                                                  FontWeight="Bold"
                                                  Foreground="White"/>
                                     </Border>
@@ -165,7 +240,7 @@
                                              TextWrapping="Wrap"/>
 
                                     <!-- Position -->
-                                    <TextBlock Text="{Binding PositionDisplay}" 
+                                    <TextBlock Text="{Binding GridPositionDisplay}" 
                                              FontSize="11" 
                                              Foreground="#CCCCCC"
                                              Margin="0,4,0,0"/>
@@ -176,7 +251,7 @@
                                           VerticalAlignment="Center"
                                           FontSize="12"
                                           Foreground="#666666"
-                                          Text="{Binding PositionDisplay}">
+                                          Text="{Binding GridPositionDisplay}">
                                     <TextBlock.Style>
                                         <Style TargetType="TextBlock">
                                             <Setter Property="Visibility" Value="Collapsed"/>
@@ -192,8 +267,10 @@
                         </Border>
                     </DataTemplate>
                 </ItemsControl.ItemTemplate>
-            </ItemsControl>
-        </ScrollViewer>
+                        </ItemsControl>
+                </StackPanel>
+            </Border>
+        </Grid>
 
         <!-- Status Bar -->
         <Border Grid.Row="2" Background="#2D2D30" Padding="20,12" BorderBrush="#3F3F46" BorderThickness="0,1,0,0">

@@ -50,6 +50,28 @@ namespace OmniMouse.Network
             _setCursorPos = setCursorPos ?? NativeSetCursorPos;
         }
 
+                private void ProcessMessage(byte msgType, byte[] data, IPEndPoint remoteEP)
+        {
+            switch (msgType)
+            {
+                case 0x21: // PRE-FLIGHT ACK - NEW
+                    OmniMouse.Hooks.InputHooks.OnPreFlightAckReceived();
+                    Console.WriteLine("[UDP][PreFlight] ACK received from peer");
+                    break;
+                // ...existing cases...
+            }
+        }
+
+        // Public helper for direct sends (used by preflight)
+        public void SendDirect(byte[] data, int length)
+        {
+            if (_udpClient == null || _remoteEndPoint == null)
+            {
+                throw new InvalidOperationException("UDP client not initialized or remote endpoint unknown");
+            }
+            _udpClient.Send(data, length, _remoteEndPoint);
+        }
+
         public void StartHost()
         {
             _udpClient = _udpClientFactoryWithPort(UdpPort);

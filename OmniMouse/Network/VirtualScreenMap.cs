@@ -288,18 +288,23 @@ namespace OmniMouse.Network
             _rw.EnterReadLock();
             try
             {
-                // Use the lock-aware helper to avoid re-entering the reader lock inside FindMonitorAt.
                 monitor = FindMonitorAtLocked(globalX, globalY);
                 if (monitor == null) return false;
 
                 localX = globalX - monitor.GlobalBounds.Left + monitor.LocalBounds.Left;
                 localY = globalY - monitor.GlobalBounds.Top + monitor.LocalBounds.Top;
+
+                // Clamp to inside local bounds (Right/Bottom are exclusive)
+                if (localX < monitor.LocalBounds.Left) localX = monitor.LocalBounds.Left;
+                if (localY < monitor.LocalBounds.Top) localY = monitor.LocalBounds.Top;
+                if (localX >= monitor.LocalBounds.Right) localX = monitor.LocalBounds.Right - 1;
+                if (localY >= monitor.LocalBounds.Bottom) localY = monitor.LocalBounds.Bottom - 1;
+
                 return true;
             }
             finally { _rw.ExitReadLock(); }
         }
 
-        // Translate a local coordinate (on a given monitor) into the global virtual space.
         public bool TranslateLocalToGlobal(string monitorId, int localX, int localY, out int globalX, out int globalY)
         {
             globalX = globalY = 0;
@@ -307,6 +312,13 @@ namespace OmniMouse.Network
             try
             {
                 if (!_monitors.TryGetValue(monitorId, out var m)) return false;
+
+                // Clamp incoming local coords (ensure mapping stays inside target global rect)
+                if (localX < m.LocalBounds.Left) localX = m.LocalBounds.Left;
+                if (localY < m.LocalBounds.Top) localY = m.LocalBounds.Top;
+                if (localX >= m.LocalBounds.Right) localX = m.LocalBounds.Right - 1;
+                if (localY >= m.LocalBounds.Bottom) localY = m.LocalBounds.Bottom - 1;
+
                 globalX = m.GlobalBounds.Left + (localX - m.LocalBounds.Left);
                 globalY = m.GlobalBounds.Top + (localY - m.LocalBounds.Top);
                 return true;

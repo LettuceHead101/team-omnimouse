@@ -193,6 +193,9 @@ namespace OmniMouse.Network
                 InitializeLayoutCoordinator(localMachineId, remoteMachineId);
 
                 RoleChanged?.Invoke(negotiatedLocalRole);
+                
+                // Send monitor information to peer after handshake completes
+                SendMonitorInfo();
             }
             catch (Exception ex)
             {
@@ -267,6 +270,11 @@ namespace OmniMouse.Network
             InitializeLayoutCoordinator(localMachineId, remoteMachineId);
 
             RoleChanged?.Invoke(negotiatedLocalRole);
+            
+            // Note: SendMonitorInfo will be called when RegisterLocalScreenMap is invoked
+            // (after hooks are initialized), avoiding race condition where peer receives
+            // monitors before their screen map is ready.e initialized), avoiding race condition where peer receives
+            // monitors before their screen map is ready.
         }
 
         private static long RandomNonce()

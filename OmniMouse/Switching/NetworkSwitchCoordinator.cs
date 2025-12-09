@@ -6,10 +6,6 @@ using OmniMouse.Network;
 
 namespace OmniMouse.Switching
 {
-    /// <summary>
-    /// Bridges the MultiMachineSwitcher with the network layer (UdpMouseTransmitter).
-    /// hhandles switch events and coordinates network communication.
-    /// </summary>
     public class NetworkSwitchCoordinator
     {
         private readonly IMultiMachineSwitcher switcher;
@@ -24,106 +20,92 @@ namespace OmniMouse.Switching
             this.switcher = switcher ?? throw new ArgumentNullException(nameof(switcher));
             this.transmitter = transmitter ?? throw new ArgumentNullException(nameof(transmitter));
             this.localMachineName = localMachineName ?? throw new ArgumentNullException(nameof(localMachineName));
-
-            // subscribe to switch events
             this.switcher.SwitchRequested += OnSwitchRequested;
         }
 
         public void Cleanup()
         {
             if (this.switcher != null)
-            {
                 this.switcher.SwitchRequested -= OnSwitchRequested;
-            }
         }
 
         private void OnSwitchRequested(object? sender, MachineSwitchEventArgs e)
         {
-            if (e == null || string.IsNullOrWhiteSpace(e.ToMachine))
-            {
-                return;
-            }
+            if (e == null || string.IsNullOrWhiteSpace(e.ToMachine)) return;
 
-            Console.WriteLine($"[NetworkSwitchCoordinator] Switch: {e.FromMachine} -> {e.ToMachine}");
-            Console.WriteLine($"  Reason: {e.Reason}, Direction: {e.Direction}");
-            Console.WriteLine($"  Universal Point: ({e.UniversalCursorPoint.X}, {e.UniversalCursorPoint.Y})");
-            Console.WriteLine($"[NetworkSwitchCoordinator][DEBUG] Current transmitter role before SendTakeControl");
+            Console.WriteLine($"[NetworkSwitchCoordinator] Switch: {e.FromMachine} -> {e.ToMachine} (Dir: {e.Direction})");
 
             try
             {
-                // clamp the local cursor to the touched edge to avoid oscillation/retrigger
-                // CRITICAL: SetCursorPos MUST be called asynchronously to avoid blocking the mouse hook thread
-                try
+                var bounds = this.switcher.GetScreenBounds().DesktopBounds;
+
+                // 1. Clamp Local Cursor (Sender Visuals)
+                // This keeps the mouse stuck to the edge of the screen briefly while the switch happens
+                int localX = e.RawCursorPoint.X;
+                int localY = Math.Max(bounds.Top, Math.Min(bounds.Bottom - 1, e.RawCursorPoint.Y));
+
+                switch (e.Direction)
                 {
-                    var bounds = this.switcher.GetScreenBounds().DesktopBounds;
-                    int x = e.RawCursorPoint.X;
-                    int y = e.RawCursorPoint.Y;
+                    case Direction.Left: localX = bounds.Left; break;
+                    case Direction.Right: localX = bounds.Right - 1; break;
+                    case Direction.Up: localY = bounds.Top; break;
+                    case Direction.Down: localY = bounds.Bottom - 1; break;
+                }
 
-                    // Clamp Y within desktop
-                    y = Math.Max(bounds.Top, Math.Min(bounds.Bottom - 1, y));
-
-                    switch (e.Direction)
+                // Execute SetCursorPos on background thread to avoid blocking hooks
+                ThreadPool.QueueUserWorkItem(_ =>
+                {
+                    try
                     {
-                        case Direction.Left:
-                            x = bounds.Left;
-                            break;
-                        case Direction.Right:
-                            x = bounds.Right - 1;
-                            break;
-                        case Direction.Up:
-                            x = Math.Max(bounds.Left, Math.Min(bounds.Right - 1, x));
-                            y = bounds.Top;
-                            break;
-                        case Direction.Down:
-                            x = Math.Max(bounds.Left, Math.Min(bounds.Right - 1, x));
-                            y = bounds.Bottom - 1;
-                            break;
+                        InputHooks.SuppressNextMoveFrom(localX, localY);
+                        SetCursorPos(localX, localY);
                     }
+                    catch { /* Ignore logging here for speed */ }
+                });
 
-                    // Capture values for async callback
-                    int clampedX = x;
-                    int clampedY = y;
+                // 2. Calculate target entry coordinates
+                // The UniversalCursorPoint preserves the correct position along the non-crossing axis,
+                // but we need to adjust the crossing axis to enter at the opposite edge
+                int sendTargetX = e.UniversalCursorPoint.X;
+                int sendTargetY = e.UniversalCursorPoint.Y;
 
-                    // CRITICAL FIX: Execute SetCursorPos on a background thread to prevent UI freeze
-                    // Calling SetCursorPos directly in the mouse hook callback causes re-entrant blocking
-                    ThreadPool.QueueUserWorkItem(_ =>
-                    {
-                        try
-                        {
-                            // Suppress feedback for the position we are about to set
-                            InputHooks.SuppressNextMoveFrom(clampedX, clampedY);
-                            SetCursorPos(clampedX, clampedY);
-                        }
-                        catch (Exception ex)
-                        {
-                            Console.WriteLine($"[NetworkSwitchCoordinator] SetCursorPos failed: {ex.Message}");
-                        }
-                    });
-                }
-                catch (Exception clampEx)
+                const int UniversalMax = 65535;
+                const int EdgeOffset = 100; // Small offset from edge in universal coordinates
+
+                switch (e.Direction)
                 {
-                    Console.WriteLine($"[NetworkSwitchCoordinator] Clamp failed: {clampEx.Message}");
+                    case Direction.Right:
+                        // Exiting RIGHT → Enter target's LEFT edge (preserve Y)
+                        sendTargetX = EdgeOffset;
+                        break;
+
+                    case Direction.Left:
+                        // Exiting LEFT → Enter target's RIGHT edge (preserve Y)
+                        sendTargetX = UniversalMax - EdgeOffset;
+                        break;
+
+                    case Direction.Down:
+                        // Exiting BOTTOM → Enter target's TOP edge (preserve X)
+                        sendTargetY = EdgeOffset;
+                        break;
+                        
+                    case Direction.Up:
+                        // Exiting TOP → Enter target's BOTTOM edge (preserve X)
+                        sendTargetY = UniversalMax - EdgeOffset;
+                        break;
                 }
 
-                // Send take-control message to target machine
-                // IMPORTANT: Send the UNIVERSAL (0..65535) coordinates so the receiver can
-                // map to its own screen bounds and start at its LEFT/RIGHT edge appropriately.
-                this.transmitter.SendTakeControl(
-                    e.ToMachine,
-                    e.UniversalCursorPoint.X,
-                    e.UniversalCursorPoint.Y);
+                // 3. Send the corrected target coordinates
+                this.transmitter.SendTakeControl(e.ToMachine, sendTargetX, sendTargetY);
 
-                // Update active machine in switcher
                 this.switcher.SetActiveMachine(e.ToMachine);
-
-                // Enable continuous remote streaming of local mouse moves until we switch back
                 InputHooks.BeginRemoteStreaming(e.Direction);
 
-                Console.WriteLine($"[NetworkSwitchCoordinator] Sent take-control to {e.ToMachine}");
+                Console.WriteLine($"[NetworkSwitchCoordinator] Sent TakeControl -> {e.ToMachine} @ ({sendTargetX},{sendTargetY})");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[NetworkSwitchCoordinator] Error sending switch: {ex.Message}");
+                Console.WriteLine($"[NetworkSwitchCoordinator] Error: {ex.Message}");
             }
         }
 

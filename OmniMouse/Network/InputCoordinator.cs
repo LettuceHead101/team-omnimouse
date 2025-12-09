@@ -1,39 +1,27 @@
 using System;
 using System.Runtime.InteropServices;
 using OmniMouse.Hooks;
+using System.Linq;
+using System.Collections.Generic;
 
 namespace OmniMouse.Network
 {
-    /// <summary>
-    /// Coordinates local input with the VirtualScreenMap and the network transmitter.
-    /// Purely responsible for detecting monitor ownership transitions and issuing a
-    /// precise "take control at (x,y)" message to the target client.
-    /// Caller/higher layers own starting/stopping hooks and wiring events.
-    /// </summary>
     public sealed class InputCoordinator
     {
         private readonly VirtualScreenMap _screenMap;
         private readonly UdpMouseTransmitter _udpService;
         private readonly string _selfClientId;
 
-        // Add public accessors for InputHooks to use
         internal VirtualScreenMap ScreenMap => _screenMap;
         internal string SelfClientId => _selfClientId;
 
-        // Protects _globalMouseX/_globalMouseY/_currentActiveClientId/_lastMonitor
         private readonly object _coordinatorLock = new object();
-
-        // The ID of the client that currently has control. Starts as this machine.
         private string _currentActiveClientId;
 
-        // Current global virtual cursor position (integer coordinates)
         private int _globalMouseX;
         private int _globalMouseY;
-
-        // Optional: last known monitor (helps dead-zone clamping)
         private MonitorInfo? _lastMonitor;
 
-        // Event to notify caller that this machine should become Server and start hooks.
         public event Action? BecameServer;
 
         public InputCoordinator(VirtualScreenMap map, UdpMouseTransmitter udpService, string selfClientId)
@@ -43,7 +31,6 @@ namespace OmniMouse.Network
             _selfClientId = selfClientId ?? throw new ArgumentNullException(nameof(selfClientId));
             _currentActiveClientId = _selfClientId;
 
-            // initialize global position to current cursor position (desktop coords)
             if (GetCursorPos(out var p))
             {
                 _globalMouseX = p.x;
@@ -55,12 +42,9 @@ namespace OmniMouse.Network
                 _globalMouseY = 0;
             }
 
-            // Subscribe to incoming take-control messages so we can become server
             _udpService.TakeControlReceived += OnReceiveTakeControl;
         }
 
-        // Called by the low-level hook on the active server with motion DELTAS.
-        // IMPORTANT: pass deltas, not absolute moves.
         public void OnMouseInput(int deltaX, int deltaY)
         {
             string? targetClientId = null;
@@ -68,91 +52,180 @@ namespace OmniMouse.Network
 
             lock (_coordinatorLock)
             {
-                _globalMouseX += deltaX;
-                _globalMouseY += deltaY;
+                // 1. Apply Deltas
+                int appliedX = deltaX;
+                int appliedY = deltaY;
 
-                if (_screenMap.TranslateGlobalToLocal(_globalMouseX, _globalMouseY, out var monitor, out var localX, out var localY))
+                // (Keeping existing clipping logic for brevity - it is correct)
+                if (_lastMonitor != null)
                 {
-                    // Valid monitor under the virtual map
-                    _lastMonitor = monitor;
-
-                    if (monitor != null && monitor.OwnerClientId != _currentActiveClientId)
+                    var gb = _lastMonitor.GlobalBounds;
+                    if (deltaX > 0 && _screenMap.FindNeighbor(_lastMonitor, "right") == null)
                     {
-                        Console.WriteLine($"[InputCoordinator] Transition from {_currentActiveClientId} -> {monitor.OwnerClientId} at global({_globalMouseX},{_globalMouseY}) -> local({localX},{localY})");
-
-                        targetClientId = monitor.OwnerClientId;
-                        sendLocalX = localX;
-                        sendLocalY = localY;
-
-                        // Update our local state: we have relinquished control.
-                        _currentActiveClientId = monitor.OwnerClientId;
-                        // The UdpMouseTransmitter.SendTakeControl already calls SetLocalRole(Receiver).
+                        int maxForward = (gb.Right - 1) - _globalMouseX;
+                        if (maxForward <= 0) appliedX = 0;
+                        else if (deltaX > maxForward) appliedX = maxForward;
+                    }
+                    else if (deltaX < 0 && _screenMap.FindNeighbor(_lastMonitor, "left") == null)
+                    {
+                        int maxBack = _globalMouseX - gb.Left;
+                        if (maxBack <= 0) appliedX = 0;
+                        else if (-deltaX > maxBack) appliedX = -maxBack;
+                    }
+                    if (deltaY > 0 && _screenMap.FindNeighbor(_lastMonitor, "down") == null)
+                    {
+                        int maxDown = (gb.Bottom - 1) - _globalMouseY;
+                        if (maxDown <= 0) appliedY = 0;
+                        else if (deltaY > maxDown) appliedY = maxDown;
+                    }
+                    else if (deltaY < 0 && _screenMap.FindNeighbor(_lastMonitor, "up") == null)
+                    {
+                        int maxUp = _globalMouseY - gb.Top;
+                        if (maxUp <= 0) appliedY = 0;
+                        else if (-deltaY > maxUp) appliedY = -maxUp;
                     }
                 }
-                else
+
+                _globalMouseX += appliedX;
+                _globalMouseY += appliedY;
+
+                // Clamp to non-negative if no monitor/lastMonitor exists
+                if (_lastMonitor == null)
                 {
-                    // Simple policy for dead zones: clamp to last known monitor boundary to avoid losing the cursor.
-                    if (_lastMonitor != null)
+                    if (_globalMouseX < 0) _globalMouseX = 0;
+                    if (_globalMouseY < 0) _globalMouseY = 0;
+                }
+
+                // 2. Check Monitor & Transitions
+                if (_screenMap.TranslateGlobalToLocal(_globalMouseX, _globalMouseY, out var monitor, out var _, out var _))
+                {
+                    _lastMonitor = monitor;
+
+                    // Transition Detected
+                    if (monitor != null && monitor.OwnerClientId != _currentActiveClientId)
                     {
-                        var gb = _lastMonitor.GlobalBounds;
-                        _globalMouseX = Math.Clamp(_globalMouseX, gb.Left, gb.Right - 1);
-                        _globalMouseY = Math.Clamp(_globalMouseY, gb.Top, gb.Bottom - 1);
+                        Console.WriteLine($"[InputCoordinator] Transition {_currentActiveClientId} -> {monitor.OwnerClientId}");
+
+                        targetClientId = monitor.OwnerClientId;
+                        _currentActiveClientId = monitor.OwnerClientId;
+
+                        // --- EDGE SNAP LOGIC ---
+                        // Force cursor to the correct edge of the Target PC
+                        var targetMonitors = _screenMap.GetMonitorsSnapshot()
+                                                       .Where(m => m.OwnerClientId == targetClientId)
+                                                       .ToList();
+
+                        if (targetMonitors.Count > 0)
+                        {
+                            MonitorInfo? edgeMonitor = null;
+
+                            if (deltaX < 0) // Moving Left (Entering from Right)
+                            {
+                                // Find rightmost monitor(s)
+                                edgeMonitor = targetMonitors.OrderByDescending(m => m.GlobalBounds.Right).FirstOrDefault();
+
+                                if (edgeMonitor != null)
+                                {
+                                    // Snap Global X to the Right Edge of that monitor
+                                    int relativeX = edgeMonitor.GlobalBounds.Right - 1;
+
+                                    // Preserve Y relative to center if needed, or simple clamp
+                                    int clampedY = Math.Max(edgeMonitor.GlobalBounds.Top, Math.Min(_globalMouseY, edgeMonitor.GlobalBounds.Bottom - 1));
+
+                                    _globalMouseX = relativeX;
+                                    _globalMouseY = clampedY;
+                                    _lastMonitor = edgeMonitor;
+                                }
+                            }
+                            else if (deltaX > 0) // Moving Right (Entering from Left)
+                            {
+                                edgeMonitor = targetMonitors.OrderBy(m => m.GlobalBounds.Left).FirstOrDefault();
+
+                                if (edgeMonitor != null)
+                                {
+                                    int relativeX = edgeMonitor.GlobalBounds.Left;
+                                    int clampedY = Math.Max(edgeMonitor.GlobalBounds.Top, Math.Min(_globalMouseY, edgeMonitor.GlobalBounds.Bottom - 1));
+
+                                    _globalMouseX = relativeX;
+                                    _globalMouseY = clampedY;
+                                    _lastMonitor = edgeMonitor;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // 3. Coordinate Translation (THE FIX)
+                // Instead of trusting LocalBounds of the specific monitor, we calculate position relative to the Target Client's origin.
+                if (_lastMonitor != null)
+                {
+                    string targetOwner = _lastMonitor.OwnerClientId;
+
+                    // Find the "Origin" monitor for this client (Top-Left most monitor)
+                    var clientMonitors = _screenMap.GetMonitorsSnapshot().Where(m => m.OwnerClientId == targetOwner).ToList();
+
+                    if (clientMonitors.Count > 0)
+                    {
+                        // Calculate Client's Global Origin (Min Global X, Min Global Y)
+                        int clientMinGlobalX = clientMonitors.Min(m => m.GlobalBounds.Left);
+                        int clientMinGlobalY = clientMonitors.Min(m => m.GlobalBounds.Top);
+
+                        // Calculate Client's Local Origin (Min Local X, Min Local Y) - Usually (0,0)
+                        int clientMinLocalX = clientMonitors.Min(m => m.LocalBounds.Left);
+                        int clientMinLocalY = clientMonitors.Min(m => m.LocalBounds.Top);
+
+                        // Map Global Mouse to Client Local Space
+                        // Formula: (CurrentGlobal - ClientGlobalStart) + ClientLocalStart
+                        sendLocalX = (_globalMouseX - clientMinGlobalX) + clientMinLocalX;
+                        sendLocalY = (_globalMouseY - clientMinGlobalY) + clientMinLocalY;
+
+                        // Debug Log to verify coordinates
+                        if (targetClientId != null)
+                        {
+                            Console.WriteLine($"[InputCoordinator] Sending: Global({_globalMouseX}) -> Local({sendLocalX}). Target Origin GlobalX: {clientMinGlobalX}");
+                        }
                     }
                     else
                     {
-                        // No map context: clamp to non-negative
-                        _globalMouseX = Math.Max(0, _globalMouseX);
-                        _globalMouseY = Math.Max(0, _globalMouseY);
+                        // Fallback
+                        sendLocalX = _globalMouseX;
+                        sendLocalY = _globalMouseY;
                     }
                 }
             }
 
-            // Send outside lock to avoid holding the lock during I/O
             if (targetClientId != null)
             {
                 _udpService.SendTakeControl(targetClientId, sendLocalX, sendLocalY);
             }
         }
 
-        // When a take-control packet arrives for this machine, become the server.
         private void OnReceiveTakeControl(int localX, int localY)
         {
-            Console.WriteLine($"[InputCoordinator] Received TakeControl -> become server and set cursor to ({localX},{localY})");
-            
-            // End remote streaming mode since we're now receiving control
+            Console.WriteLine($"[InputCoordinator] Received TakeControl -> SetCursorPos({localX},{localY})");
             InputHooks.EndRemoteStreaming();
-            
-            // IMPORTANT: Remain Receiver so this machine will apply incoming mouse moves
-            // from the peer. The sender continues streaming motion events after take-control.
             _udpService.SetLocalRole(ConnectionRole.Receiver);
-
-            // Position cursor exactly at the requested local coords
             SetCursorPos(localX, localY);
 
-            // Update internal global mouse position according to the virtual map if possible
+            // Sync internal state to match the received position
             lock (_coordinatorLock)
             {
-                // Try to translate this monitor/local into global coordinates:
-                // Find monitor containing (localX, localY) that belongs to this client.
-                foreach (var m in _screenMap.GetMonitorsSnapshot())
+                _currentActiveClientId = _selfClientId;
+                // Re-find the monitor that contains this local point to sync _globalMouseX
+                foreach (var m in _screenMap.GetMonitorsSnapshot().Where(x => x.OwnerClientId == _selfClientId))
                 {
-                    if (m.OwnerClientId == _selfClientId)
+                    // Check if localX/Y is within this monitor's projected local bounds
+                    // We assume LocalBounds are correct desktop coords here.
+                    if (localX >= m.LocalBounds.Left && localX < m.LocalBounds.Right &&
+                        localY >= m.LocalBounds.Top && localY < m.LocalBounds.Bottom)
                     {
-                        // local-space to global-space mapping if this local coordinate falls within the local bounds
-                        if (localX >= m.LocalBounds.Left && localX < m.LocalBounds.Right && localY >= m.LocalBounds.Top && localY < m.LocalBounds.Bottom)
-                        {
-                            _globalMouseX = m.GlobalBounds.Left + (localX - m.LocalBounds.Left);
-                            _globalMouseY = m.GlobalBounds.Top + (localY - m.LocalBounds.Top);
-                            _lastMonitor = m;
-                            break;
-                        }
+                        _globalMouseX = m.GlobalBounds.Left + (localX - m.LocalBounds.Left);
+                        _globalMouseY = m.GlobalBounds.Top + (localY - m.LocalBounds.Top);
+                        _lastMonitor = m;
+                        break;
                     }
                 }
-
-                _currentActiveClientId = _selfClientId;
             }
-
-            // We intentionally do not start hooks here; the sender keeps streaming.
         }
 
         [DllImport("user32.dll")]

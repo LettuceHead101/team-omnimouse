@@ -28,7 +28,7 @@ namespace OmniMouse.Hooks
 
         // Win32 structs
         [StructLayout(LayoutKind.Sequential)]
-        private struct POINT { public int x; public int y; }
+        internal struct POINT { public int x; public int y; }
 
         [StructLayout(LayoutKind.Sequential)]
         private struct MSLLHOOKSTRUCT
@@ -87,6 +87,18 @@ namespace OmniMouse.Hooks
         [DllImport("user32.dll")]
         private static extern bool GetCursorPos(out POINT lpPoint);
 
+        /// <summary>
+        /// Delegate signature for GetCursorPos replacement in tests.
+        /// </summary>
+        internal delegate bool GetCursorPosDelegate(out POINT lpPoint);
+
+        /// <summary>
+        /// Test seam: expose a delegate indirection so unit tests can override the native
+        /// GetCursorPos behavior. Production uses the real P/Invoke; tests can replace this
+        /// field via reflection to return deterministic cursor positions.
+        /// </summary>
+        internal static GetCursorPosDelegate GetCursorPosImpl = GetCursorPos;
+
         [DllImport("user32.dll")]
         private static extern int GetMessage(out MSG lpMsg, IntPtr hWnd, uint wMsgFilterMin, uint wMsgFilterMax);
 
@@ -127,11 +139,16 @@ namespace OmniMouse.Hooks
         private const int MOUSEEVENTF_WHEEL = 0x0800;
         private const int MOUSEEVENTF_ABSOLUTE = 0x8000;
 
+        // Keyboard event flags
+        private const int KEYEVENTF_EXTENDEDKEY = 0x0001;
+        private const int KEYEVENTF_KEYUP = 0x0002;
+        private const int KEYEVENTF_SCANCODE = 0x0008;
+
         [StructLayout(LayoutKind.Sequential)]
         private struct INPUT
         {
             public int type;
-            public MOUSEINPUT mi;
+            public INPUT_UNION u;
         }
 
         [StructLayout(LayoutKind.Sequential)]
@@ -144,5 +161,26 @@ namespace OmniMouse.Hooks
             public int time;
             public IntPtr dwExtraInfo;
         }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct KEYBDINPUT
+        {
+            public ushort wVk;
+            public ushort wScan;
+            public int dwFlags;
+            public int time;
+            public IntPtr dwExtraInfo;
+        }
+
+        [StructLayout(LayoutKind.Explicit)]
+        private struct INPUT_UNION
+        {
+            [FieldOffset(0)]
+            public MOUSEINPUT mi;
+            [FieldOffset(0)]
+            public KEYBDINPUT ki;
+        }
+
+
     }
 }

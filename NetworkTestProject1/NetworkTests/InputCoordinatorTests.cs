@@ -65,7 +65,7 @@
 
             // SendTakeControl should have been called with target 'other' and local coordinates
             Assert.AreEqual("other", capturedTarget, "SendTakeControl target client id should be the remote monitor owner.");
-            Assert.AreEqual(4, capturedLocalX, "Local X should be translated relative to the remote monitor's left bound.");
+            Assert.AreEqual(0, capturedLocalX, "Local X should be 0 when snapping to the left edge of the remote monitor.");
             Assert.AreEqual(50, capturedLocalY, "Local Y should map to same Y offset within the remote monitor.");
 
             // Also assert that _currentActiveClientId was updated
@@ -457,7 +457,7 @@
 
             // Assert seam captured expected values
             Assert.AreEqual("other", capturedTarget, "Seam should capture the remote owner id.");
-            Assert.AreEqual(4, capturedLocalX, "Local X should be relative to remote monitor left bound.");
+            Assert.AreEqual(0, capturedLocalX, "Local X should be 0 when snapping to the left edge of the remote monitor.");
             Assert.AreEqual(50, capturedLocalY, "Local Y should preserve offset.");
         }
 

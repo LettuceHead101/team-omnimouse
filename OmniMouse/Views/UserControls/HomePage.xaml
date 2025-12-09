@@ -5,16 +5,25 @@
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008" 
              xmlns:local="clr-namespace:OmniMouse.Views.UserControls"
              xmlns:viewModel="clr-namespace:OmniMouse.ViewModel"
+             xmlns:mvvm="clr-namespace:OmniMouse.MVVM"
              mc:Ignorable="d"
              d:DesignHeight="450" d:DesignWidth="625"
              Loaded="OnLoaded"
-             Unloaded="OnUnloaded">
+             Unloaded="OnUnloaded"
+             AllowDrop="True"
+             DragEnter="HomePage_DragEnter"
+             DragOver="HomePage_DragOver"
+             DragLeave="HomePage_DragLeave"
+             Drop="HomePage_Drop">
 
     <UserControl.DataContext>
         <viewModel:HomePageViewModel />
     </UserControl.DataContext>
 
     <UserControl.Resources>
+        <mvvm:GreaterThanZeroConverter x:Key="GreaterThanZero"/>
+        <mvvm:BytesToStringConverter x:Key="BytesToString"/>
+        
         <SolidColorBrush x:Key="Bg" Color="#111315"/>
         <SolidColorBrush x:Key="Card" Color="#1E1F22"/>
         <SolidColorBrush x:Key="Ink" Color="#E5E7EB"/>
@@ -92,8 +101,9 @@
         </Style>
     </UserControl.Resources>
 
-    <Grid Margin="16">
+    <Grid Margin="10">
         <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
@@ -134,20 +144,40 @@
                             Command="{Binding DisconnectCommand}" 
                             IsEnabled="{Binding CanDisconnect}"
                             AutomationProperties.AutomationId="DisconnectButton"/>
+                    <Button Content="Upload" Command="{Binding UploadFileCommand}" ToolTip="Select and send a file to peer"/>
                     <Button Content="Layout" Command="{Binding ShowLayoutCommand}" ToolTip="Show current machine layout"/>
                 </StackPanel>
 
                 <Border Grid.Column="1" CornerRadius="12" Background="#101113" Padding="8" Margin="12,0,0,0">
-                    <DockPanel LastChildFill="True">
-                        <TextBlock Text="Peer IP:" Foreground="{StaticResource Dim}" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                        <TextBox x:Name="HostIpBox" VerticalAlignment="Center" 
-                                 Text="{Binding HostIp, UpdateSourceTrigger=PropertyChanged}"
-                                 AutomationProperties.AutomationId="HostIpBox"/>
-                    </DockPanel>
+                    <StackPanel Orientation="Vertical">
+                        <DockPanel LastChildFill="True" Margin="0,0,0,4">
+                            <TextBlock Text="Status:" Foreground="{StaticResource Dim}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                            <TextBlock x:Name="DiscoveryStatusBox" VerticalAlignment="Center" 
+                                       Foreground="{StaticResource Ink}"
+                                       Text="{Binding DiscoveryStatus, Mode=OneWay}"
+                                       AutomationProperties.AutomationId="DiscoveryStatusBox"/>
+                        </DockPanel>
+                        <DockPanel LastChildFill="True">
+                            <TextBlock Text="Manual IP:" Foreground="{StaticResource Dim}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                            <Button Content="→" Width="30" Margin="4,0,0,0" DockPanel.Dock="Right"
+                                    Command="{Binding ConnectToIpCommand}"
+                                    ToolTip="Connect to this IP directly"/>
+                            <TextBox x:Name="ManualIpBox" VerticalAlignment="Center"
+                                     Text="{Binding ManualIpAddress, UpdateSourceTrigger=PropertyChanged}"
+                                     AutomationProperties.AutomationId="ManualIpBox"
+                                     ToolTip="Enter peer IP if auto-discovery fails"/>
+                        </DockPanel>
+                    </StackPanel>
                 </Border>
 
-                <!-- Status / Actions (optional future expansion) -->
-                <StackPanel Orientation="Horizontal" Grid.Column="2" Margin="12,0,0,0" VerticalAlignment="Center"/>
+                <!-- File save location controls -->
+                <StackPanel Orientation="Horizontal" Grid.Column="2" Margin="12,0,0,0" VerticalAlignment="Center"
+                            DataContext="{Binding FileShareViewModel}">
+                    <TextBlock Text="Save to:" Foreground="{StaticResource Dim}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                    <TextBox Text="{Binding DownloadFolderPath, UpdateSourceTrigger=PropertyChanged}"
+                             IsReadOnly="True" Width="260" VerticalAlignment="Center"/>
+                    <Button Content="Change…" Command="{Binding BrowseDownloadFolderCommand}" Margin="8,0,0,0"/>
+                </StackPanel>
             </Grid>
         </Border>
 
@@ -155,7 +185,50 @@
             <TextBlock Text="OmniMouse Input/Output Log" Foreground="{StaticResource Ink}" FontWeight="SemiBold"/>
         </Border>
 
-        <Border Grid.Row="3" Style="{StaticResource PillBorder}" CornerRadius="18" Padding="10">
+        <!-- File Sharing Panel -->
+        <Border Grid.Row="3" CornerRadius="16" Padding="10" Margin="0,0,0,10"
+                DataContext="{Binding FileShareViewModel}">
+            <Border.Style>
+                <Style TargetType="Border" BasedOn="{StaticResource PillBorder}">
+                    <Setter Property="Visibility" Value="Collapsed"/>
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding IncomingFiles.Count, Converter={StaticResource GreaterThanZero}}" Value="True">
+                            <Setter Property="Visibility" Value="Visible"/>
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </Border.Style>
+            <StackPanel>
+                <TextBlock Text="Incoming Files" Foreground="{StaticResource Ink}" FontWeight="SemiBold" Margin="0,0,0,8"/>
+                <ItemsControl ItemsSource="{Binding IncomingFiles}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Border Background="#25272C" CornerRadius="12" Padding="10" Margin="0,0,0,6">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    
+                                    <StackPanel Grid.Column="0">
+                                        <TextBlock Text="{Binding FileName}" Foreground="{StaticResource Ink}" FontWeight="Medium"/>
+                                        <TextBlock Text="{Binding FileSizeBytes, Converter={StaticResource BytesToString}}" 
+                                                   Foreground="{StaticResource Dim}" FontSize="12" Margin="0,2,0,0"/>
+                                    </StackPanel>
+                                    
+                                    <Button Grid.Column="1" Content="Download" 
+                                            Command="{Binding DataContext.DownloadFileCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                            CommandParameter="{Binding}"
+                                            VerticalAlignment="Center" Margin="10,0,0,0"/>
+                                </Grid>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </StackPanel>
+        </Border>
+
+        <Border Grid.Row="4" Style="{StaticResource PillBorder}" CornerRadius="18" Padding="10">
             <TextBox x:Name="ConsoleOutputBox"
                      Background="#101113"
                      Foreground="{StaticResource Ink}"
@@ -170,8 +243,26 @@
                      AutomationProperties.AutomationId="ConsoleOutputBox"/>
         </Border>
 
-        <Border Grid.Row="4" Style="{StaticResource PillBorder}" CornerRadius="14" Padding="8" Margin="0,12,0,0">
+        <Border Grid.Row="5" Style="{StaticResource PillBorder}" CornerRadius="14" Padding="8" Margin="0,12,0,0">
             <TextBlock Foreground="{StaticResource Dim}" Text="OmniMouse v1.0 - Sharing your input across devices"/>
+        </Border>
+
+        <!-- Drag-over overlay highlight -->
+        <Border x:Name="DragOverlay"
+                Background="#40FFFFFF"
+                BorderBrush="#66FFFFFF"
+                BorderThickness="2"
+                CornerRadius="18"
+                Visibility="Collapsed"
+                IsHitTestVisible="False"
+                Margin="6"
+                Panel.ZIndex="1000">
+            <TextBlock Text="Drop files to share"
+                       Foreground="White"
+                       FontWeight="SemiBold"
+                       Opacity="0.9"
+                       HorizontalAlignment="Center"
+                       VerticalAlignment="Center"/>
         </Border>
     </Grid>
 </UserControl>

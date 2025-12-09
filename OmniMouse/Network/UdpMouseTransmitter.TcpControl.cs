@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Net;
 using System.Net.Sockets;
 using System.Threading;
@@ -105,7 +106,9 @@ namespace OmniMouse.Network
                             continue;
                         }
 
-                        var payload = new byte[8];
+                        // Read payload: [localX: 4 bytes][localY: 4 bytes][direction: 1 byte (optional)]
+                        // Direction: 0xFF = none, 0x00 = Left, 0x01 = Right, 0x02 = Up, 0x03 = Down
+                        var payload = new byte[9]; // 8 bytes minimum, 9 with direction
                         r = ReadExact(ns, payload, 0, 8);
                         if (r != 8)
                         {
@@ -115,7 +118,28 @@ namespace OmniMouse.Network
 
                         int ux = BitConverter.ToInt32(payload, 0);
                         int uy = BitConverter.ToInt32(payload, 4);
-                        Console.WriteLine($"[TCP][TakeControl] Received UNIVERSAL ({ux},{uy}) from {remoteAddr}");
+                        
+                        // Try to read optional direction byte if data is available
+                        // Direction: 0xFF = none, 0x00 = Left, 0x01 = Right, 0x02 = Up, 0x03 = Down
+                        OmniMouse.Switching.Direction? entryDirection = null;
+                        if (ns.DataAvailable)
+                        {
+                            int dirByte = ns.ReadByte();
+                            if (dirByte >= 0 && dirByte != 0xFF)
+                            {
+                                entryDirection = (OmniMouse.Switching.Direction)dirByte;
+                            }
+                        }
+                        
+                        Console.WriteLine($"[TCP][TakeControl] Received UNIVERSAL ({ux},{uy}) dir={entryDirection} from {remoteAddr}");
+                        
+                        // Store entry direction for Receiver edge detection
+                        _receiverEntryDirection = entryDirection;
+
+                        // Send ACK immediately to confirm receipt (before processing)
+                        var ack = new byte[] { MSG_TAKE_CONTROL_ACK };
+                        ns.Write(ack, 0, 1);
+                        ns.Flush();
 
                         // Map universal (0..65535) to local pixel coordinates using primary bounds
                         try
@@ -123,12 +147,14 @@ namespace OmniMouse.Network
                             var topology = new Win32ScreenTopology();
                             var bounds = topology.GetScreenConfiguration();
                             var mapper = new DefaultCoordinateMapper();
-                            var refBounds = mapper.GetReferenceBounds(isRelativeMode: false, isController: false,
-                                desktopBounds: bounds.DesktopBounds, primaryBounds: bounds.PrimaryScreenBounds);
+                            var refBounds = bounds.DesktopBounds; // Use full desktop instead of primary screen only
                             var pixel = mapper.MapToPixel(new System.Drawing.Point(ux, uy), refBounds);
 
                             // End remote streaming since we're receiving control
                             InputHooks.EndRemoteStreaming();
+                            
+                            // Reset receiver cursor tracking with new entry direction
+                            ResetReceiverCursorTracking();
                             
                             InputHooks.SuppressNextMoveFrom(pixel.X, pixel.Y);
                             SetCursorPos(pixel.X, pixel.Y);
@@ -138,11 +164,6 @@ namespace OmniMouse.Network
                         {
                             Console.WriteLine($"[TCP][TakeControl] Mapping failed: {mapEx.Message}");
                         }
-
-                        // Send ACK
-                        var ack = new byte[] { MSG_TAKE_CONTROL_ACK };
-                        ns.Write(ack, 0, 1);
-                        ns.Flush();
                     }
                     catch (SocketException ex)
                     {

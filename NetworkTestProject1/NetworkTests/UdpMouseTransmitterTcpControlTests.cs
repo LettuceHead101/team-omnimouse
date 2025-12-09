@@ -135,6 +135,9 @@ namespace NetworkTestProject1.Network
             ns.WriteTimeout = 3000;
             ns.ReadTimeout = 3000;
 
+            // Wait longer to ensure server accept loop is ready
+            Thread.Sleep(200);
+
             // Build message: opcode + 4 + 4 bytes payload
             var buf = new byte[1 + 4 + 4];
             buf[0] = MSG_TAKE_CONTROL_AT;

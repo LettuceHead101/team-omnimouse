@@ -37,6 +37,10 @@ namespace NetworkTestProject1.SwitchingTests
         private class FakeTransmitter : IUdpMouseTransmitter
         {
             public (string target, int x, int y)? LastTakeControl;
+            // New IUdpMouseTransmitter events required by production code
+            public event Action<ConnectionRole>? RoleChanged;
+            public event Action<int, int>? TakeControlReceived;
+            public event Action<OmniMouse.Network.FileShare.FileOfferPacket>? FileOfferReceived;
             public void StartHost() { }
             public void StartHost(string peerIp) { }
             public void StartCoHost(string hostIp) { }
@@ -47,12 +51,19 @@ namespace NetworkTestProject1.SwitchingTests
             public void SendMouseButton(OmniMouse.Network.MouseButtonNet button, bool isDown) { }
             public void SendMouseWheel(int delta) { }
             public void Disconnect() { }
-            public void SendTakeControl(string targetClientId, int localX, int localY)
+            public void SendTakeControl(string targetClientId, int x, int y)
             {
-                LastTakeControl = (targetClientId, localX, localY);
+                LastTakeControl = (targetClientId, x, y);
+            }
+
+            public void SendTakeControl(string targetClientId, int x, int y, OmniMouse.Switching.Direction? entryDirection)
+            {
+                LastTakeControl = (targetClientId, x, y);
             }
 
             public void SendLayoutUpdate(int position, string machineId, string displayName) { }
+            public void SendGridLayoutUpdate(string machineId, string displayName, int gridX, int gridY) { }
+            public void SendFileOffer(OmniMouse.Network.FileShare.FileOfferPacket offer) { }
             public OmniMouse.Network.LayoutCoordinator GetLayoutCoordinator() => null!;
             public string GetLocalMachineId() => "test-client";
         }
@@ -60,13 +71,13 @@ namespace NetworkTestProject1.SwitchingTests
         [TestMethod]
         public void Coordinator_SendsTakeControlAndUpdatesSwitcher_OnSwitchRequested()
         {
-            var bounds = new ScreenBounds { DesktopBounds = new MyRectangle(0,0,800,600), PrimaryScreenBounds = new MyRectangle(0,0,800,600) };
+            var bounds = new ScreenBounds { DesktopBounds = new MyRectangle(0, 0, 800, 600), PrimaryScreenBounds = new MyRectangle(0, 0, 800, 600) };
             var fakeSwitcher = new FakeSwitcher(bounds);
             var fakeTransmitter = new FakeTransmitter();
 
             var coordinator = new NetworkSwitchCoordinator(fakeSwitcher, fakeTransmitter, "local");
 
-            //  event args
+            // event args
             var args = new MachineSwitchEventArgs("Local", "Target", new Point(799, 300), new Point(40000, 30000), SwitchReason.EdgeRight, Direction.Right);
 
             // do not unsubscribe here; we want the coordinator to handle the event.
@@ -77,10 +88,12 @@ namespace NetworkTestProject1.SwitchingTests
             // Allow queued threadpool work item to run (clamping and SetCursorPos may occur)
             System.Threading.Thread.Sleep(50);
 
-            //  transmitter was called with universal coordinates from args
+            // transmitter was called with corrected coordinates
             Assert.IsNotNull(fakeTransmitter.LastTakeControl);
             Assert.AreEqual("Target", fakeTransmitter.LastTakeControl?.target);
-            Assert.AreEqual(args.UniversalCursorPoint.X, fakeTransmitter.LastTakeControl?.x);
+
+            // For a switch to the right, X is reset to 0 on the new machine, while universal Y is preserved.
+            Assert.AreEqual(0, fakeTransmitter.LastTakeControl?.x);
             Assert.AreEqual(args.UniversalCursorPoint.Y, fakeTransmitter.LastTakeControl?.y);
 
             // Verify coordinator updated switcher active machine
@@ -90,17 +103,17 @@ namespace NetworkTestProject1.SwitchingTests
         [TestMethod]
         public void Coordinator_Cleanup_UnsubscribesFromSwitcher()
         {
-            var bounds = new ScreenBounds { DesktopBounds = new MyRectangle(0,0,800,600), PrimaryScreenBounds = new MyRectangle(0,0,800,600) };
+            var bounds = new ScreenBounds { DesktopBounds = new MyRectangle(0, 0, 800, 600), PrimaryScreenBounds = new MyRectangle(0, 0, 800, 600) };
             var fakeSwitcher = new FakeSwitcher(bounds);
             var fakeTransmitter = new FakeTransmitter();
             var coordinator = new NetworkSwitchCoordinator(fakeSwitcher, fakeTransmitter, "local");
 
             coordinator.Cleanup();
 
-            var args = new MachineSwitchEventArgs("Local", "Target2", new Point(0,0), new Point(100,100), SwitchReason.EdgeLeft, Direction.Left);
+            var args = new MachineSwitchEventArgs("Local", "Target2", new Point(0, 0), new Point(100, 100), SwitchReason.EdgeLeft, Direction.Left);
             fakeSwitcher.RaiseSwitch(args);
 
-            //  any queued work a moment
+            // any queued work a moment
             System.Threading.Thread.Sleep(50);
 
             // Transmitter should not have been called because we unsubscribed

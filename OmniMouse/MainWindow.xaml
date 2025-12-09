@@ -5,8 +5,11 @@
             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
             xmlns:userControls="clr-namespace:OmniMouse.Views.UserControls"
             mc:Ignorable="d"
-            Title="OmniMouse Input Monitor" Height="500" Width="800" Background="black">
+        AllowDrop="True"
+        Drop="Window_Drop"
+        DragEnter="Window_DragEnter"
+        Title="OmniMouse Input Monitor" Height="500" Width="800" Background="black">
     <Grid>
-        <userControls:HomePage Loaded="HomePage_Loaded"/>
+      <userControls:HomePage x:Name="HomePageControl" Loaded="HomePage_Loaded"/>
     </Grid>
   </Window>

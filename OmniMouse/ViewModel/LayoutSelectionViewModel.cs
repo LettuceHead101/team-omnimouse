@@ -1,12 +1,12 @@
-using OmniMouse.MVVM;
-using OmniMouse.Network;
-using System;
-using System.Collections.ObjectModel;
-using System.Linq;
-using System.Windows.Input;
-
 namespace OmniMouse.ViewModel
 {
+    using System;
+    using System.Collections.ObjectModel;
+    using System.Linq;
+    using System.Windows.Input;
+    using OmniMouse.MVVM;
+    using OmniMouse.Network;
+
     /// <summary>
     /// ViewModel for the layout selection dialog.
     /// Manages the visual representation of connected machines and their positions.
@@ -16,6 +16,8 @@ namespace OmniMouse.ViewModel
         private readonly LayoutCoordinator _coordinator;
         private readonly string _localMachineId;
         private ObservableCollection<MachinePositionItem> _machines = new();
+        private ObservableCollection<MachinePositionItem> _gridSlots = new();
+        private ObservableCollection<MachinePositionItem> _unpositionedMachines = new();
         private bool _isLayoutComplete;
         private string _statusMessage = "Arrange your PC position using drag & drop";
 
@@ -23,6 +25,18 @@ namespace OmniMouse.ViewModel
         {
             get => _machines;
             set => SetProperty(ref _machines, value);
+        }
+
+        public ObservableCollection<MachinePositionItem> GridSlots
+        {
+            get => _gridSlots;
+            set => SetProperty(ref _gridSlots, value);
+        }
+
+        public ObservableCollection<MachinePositionItem> UnpositionedMachines
+        {
+            get => _unpositionedMachines;
+            set => SetProperty(ref _unpositionedMachines, value);
         }
 
         public bool IsLayoutComplete
@@ -72,60 +86,68 @@ namespace OmniMouse.ViewModel
             var layout = _coordinator.CurrentLayout;
 
             Machines.Clear();
+            GridSlots.Clear();
+            UnpositionedMachines.Clear();
 
-            // First, add all unpositioned machines so users can see what needs to be dragged
-            var unpositionedMachines = layout.Machines.Where(m => !m.IsPositioned).ToList();
-            foreach (var machine in unpositionedMachines)
+            // Create 2x2 grid slots (4 total positions)
+            for (int y = 0; y < layout.GridHeight; y++)
             {
-                Machines.Add(new MachinePositionItem
+                for (int x = 0; x < layout.GridWidth; x++)
+                {
+                    var machineAtPos = layout.GetMachineAtGridPosition(x, y);
+                    
+                    if (machineAtPos != null)
+                    {
+                        // This slot has a machine - show the machine in grid
+                        var item = new MachinePositionItem
+                        {
+                            MachineId = machineAtPos.MachineId,
+                            DisplayName = machineAtPos.DisplayName,
+                            GridX = x,
+                            GridY = y,
+                            Position = machineAtPos.Position,
+                            IsLocal = machineAtPos.IsLocal,
+                            IsPositioned = true,
+                            IsEmptySlot = false,
+                        };
+                        GridSlots.Add(item);
+                        Machines.Add(item);
+                    }
+                    else
+                    {
+                        // Empty slot - show as drop target
+                        var emptySlot = new MachinePositionItem
+                        {
+                            MachineId = $"empty_{x}_{y}",
+                            DisplayName = $"[{x},{y}]",
+                            GridX = x,
+                            GridY = y,
+                            Position = -1,
+                            IsLocal = false,
+                            IsPositioned = false,
+                            IsEmptySlot = true,
+                        };
+                        GridSlots.Add(emptySlot);
+                    }
+                }
+            }
+
+            // Add unpositioned machines to the available list
+            foreach (var machine in layout.Machines.Where(m => !m.IsPositioned))
+            {
+                var item = new MachinePositionItem
                 {
                     MachineId = machine.MachineId,
                     DisplayName = machine.DisplayName,
-                    Position = -1, // No position yet
+                    GridX = -1,
+                    GridY = -1,
+                    Position = -1,
                     IsLocal = machine.IsLocal,
                     IsPositioned = false,
                     IsEmptySlot = false,
-                });
-            }
-
-            // Determine how many position slots we need to show
-            int totalMachines = layout.Machines.Count;
-            int maxPosition = layout.Machines.Where(m => m.IsPositioned).Any() 
-                ? layout.Machines.Where(m => m.IsPositioned).Max(m => m.Position) 
-                : -1;
-            int numSlots = Math.Max(totalMachines, maxPosition + 1);
-
-            // Create fixed position slots (0, 1, 2, ...) as drop targets
-            for (int pos = 0; pos < numSlots; pos++)
-            {
-                var machineAtPos = layout.Machines.FirstOrDefault(m => m.IsPositioned && m.Position == pos);
-                
-                if (machineAtPos != null)
-                {
-                    // This slot has a machine - show the machine
-                    Machines.Add(new MachinePositionItem
-                    {
-                        MachineId = machineAtPos.MachineId,
-                        DisplayName = machineAtPos.DisplayName,
-                        Position = pos,
-                        IsLocal = machineAtPos.IsLocal,
-                        IsPositioned = true,
-                        IsEmptySlot = false,
-                    });
-                }
-                else
-                {
-                    // Empty slot - show as drop target with minimal text
-                    Machines.Add(new MachinePositionItem
-                    {
-                        MachineId = $"empty_{pos}",
-                        DisplayName = "Unassigned",
-                        Position = pos,
-                        IsLocal = false,
-                        IsPositioned = false,
-                        IsEmptySlot = true,
-                    });
-                }
+                };
+                UnpositionedMachines.Add(item);
+                Machines.Add(item);
             }
 
             UpdateStatus();
@@ -138,24 +160,34 @@ namespace OmniMouse.ViewModel
 
         private void UpdateStatus()
         {
-            // Only count actual machines that are unpositioned (exclude any placeholder slots)
-            var unpositioned = Machines.Where(m => !m.IsPositioned && !m.MachineId.StartsWith("empty_")).ToList();
-            IsLayoutComplete = unpositioned.Count == 0;
+            IsLayoutComplete = UnpositionedMachines.Count == 0;
 
             if (IsLayoutComplete)
             {
-                StatusMessage = "Layout complete! Click Confirm to continue.";
+                StatusMessage = "✓ Layout complete! Click Confirm to continue.";
             }
             else
             {
-                StatusMessage = $"Drag any PC card to position ({unpositioned.Count} unassigned)";
+                StatusMessage = $"Drag machines from Available list to grid ({UnpositionedMachines.Count} unassigned)";
             }
         }
 
         /// <summary>
-        /// Called when user drags any machine to a new position.
+        /// Called when user drags any machine to a new grid position.
         /// </summary>
         public void MoveMachine(string machineId, int newPosition)
+        {
+            // Legacy method - convert linear position to grid coordinates
+            // For 2x2 grid: position 0 = [0,0], 1 = [1,0], 2 = [0,1], 3 = [1,1]
+            int gridX = newPosition % 2;
+            int gridY = newPosition / 2;
+            MoveMachineToGrid(machineId, gridX, gridY);
+        }
+
+        /// <summary>
+        /// Called when user drags any machine to a new grid position.
+        /// </summary>
+        public void MoveMachineToGrid(string machineId, int gridX, int gridY)
         {
             var machine = Machines.FirstOrDefault(m => m.MachineId == machineId);
             if (machine == null || machine.MachineId.StartsWith("empty_"))
@@ -163,16 +195,16 @@ namespace OmniMouse.ViewModel
                 return;
             }
 
-            // Don't allow dropping on occupied positions (only check real machines, not empty slots)
-            var conflict = Machines.FirstOrDefault(m => m.Position == newPosition && m.MachineId != machineId && m.IsPositioned && !m.MachineId.StartsWith("empty_"));
+            // Check if position is already occupied
+            var conflict = Machines.FirstOrDefault(m => m.GridX == gridX && m.GridY == gridY && m.MachineId != machineId && !m.IsEmptySlot);
             if (conflict != null)
             {
-                StatusMessage = $"Position {newPosition} is occupied by {conflict.DisplayName}";
+                StatusMessage = $"Position [{gridX},{gridY}] is occupied by {conflict.DisplayName}";
                 return;
             }
 
-            // Update any machine's position (works for both local and peer machines)
-            _coordinator.SetMachinePosition(machineId, newPosition);
+            // Update the machine's grid position via coordinator
+            _coordinator.SetMachineGridPosition(machineId, gridX, gridY);
 
             // Refresh will happen via LayoutChanged event
         }
