@@ -38,11 +38,11 @@ namespace OmniMouse.Network
             {
                 encodedX = x + (x < 0 ? -MOVE_MOUSE_RELATIVE : MOVE_MOUSE_RELATIVE);
                 encodedY = y + (y < 0 ? -MOVE_MOUSE_RELATIVE : MOVE_MOUSE_RELATIVE);
-                Console.WriteLine($"[UDP][SendMouse] Delta ({x},{y}) encoded as ({encodedX},{encodedY})");
+                //Console.WriteLine($"[UDP][SendMouse] Delta ({x},{y}) encoded as ({encodedX},{encodedY})");
             }
             else
             {
-                Console.WriteLine($"[UDP][SendMouse] Absolute ({x},{y})");
+                //Console.WriteLine($"[UDP][SendMouse] Absolute ({x},{y})");
             }
 
             var buf = new byte[1 + 8];
@@ -77,7 +77,7 @@ namespace OmniMouse.Network
             buf[1] = (byte)button;
             buf[2] = (byte)(isDown ? 1 : 0);
             _udpClient.Send(buf, buf.Length, _remoteEndPoint);
-            Console.WriteLine($"[UDP][SendBtn] {button} {(isDown ? "DOWN" : "UP")}");
+            //Console.WriteLine($"[UDP][SendBtn] {button} {(isDown ? "DOWN" : "UP")}");
         }
 
         /// <summary>
@@ -96,7 +96,7 @@ namespace OmniMouse.Network
             buf[0] = MSG_MOUSE_WHEEL;
             Array.Copy(BitConverter.GetBytes(delta), 0, buf, 1, 4);
             _udpClient.Send(buf, buf.Length, _remoteEndPoint);
-            Console.WriteLine($"[UDP][SendWheel] delta={delta}");
+            //Console.WriteLine($"[UDP][SendWheel] delta={delta}");
         }
 
         /// <summary>
@@ -112,14 +112,14 @@ namespace OmniMouse.Network
             {
                 if (!_handshakeComplete)
                 {
-                    Console.WriteLine("[UDP][SendFileOffer] Handshake not complete - cannot send file offer");
+                    //Console.WriteLine("[UDP][SendFileOffer] Handshake not complete - cannot send file offer");
                     return;
                 }
             }
 
             if (_udpClient == null || _remoteEndPoint == null)
             {
-                Console.WriteLine("[UDP][SendFileOffer] No UDP client or remote endpoint configured");
+                //Console.WriteLine("[UDP][SendFileOffer] No UDP client or remote endpoint configured");
                 return;
             }
 
@@ -136,11 +136,11 @@ namespace OmniMouse.Network
                 Array.Copy(jsonBytes, 0, buf, 5, jsonBytes.Length);
 
                 _udpClient.Send(buf, buf.Length, _remoteEndPoint);
-                Console.WriteLine($"[UDP][SendFileOffer] Sent: {offer}");
+                //Console.WriteLine($"[UDP][SendFileOffer] Sent: {offer}");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[UDP][SendFileOffer] Error: {ex.Message}");
+                //Console.WriteLine($"[UDP][SendFileOffer] Error: {ex.Message}");
             }
         }
 
@@ -177,7 +177,7 @@ namespace OmniMouse.Network
             {
                 if (_remoteEndPoint == null)
                 {
-                    Console.WriteLine($"[TCP][TakeControl] Cannot send: unknown endpoint for {targetClientId} and no learned remote endpoint.");
+                    //Console.WriteLine($"[TCP][TakeControl] Cannot send: unknown endpoint for {targetClientId} and no learned remote endpoint.");
                     throw new InvalidOperationException($"Cannot send take control: unknown endpoint for {targetClientId}");
                 }
                 targetEndPoint = _remoteEndPoint;
@@ -199,7 +199,7 @@ namespace OmniMouse.Network
                         if (existingClient.Connected)
                         {
                             tcpClient = existingClient;
-                            Console.WriteLine($"[TCP][TakeControl] Reusing existing connection to {targetClientId}");
+                            //Console.WriteLine($"[TCP][TakeControl] Reusing existing connection to {targetClientId}");
                         }
                         else
                         {
@@ -213,7 +213,7 @@ namespace OmniMouse.Network
                 // Establish new connection if needed
                 if (tcpClient == null)
                 {
-                    Console.WriteLine($"[TCP][TakeControl] Establishing new connection to {targetClientId} ({tcpEndPoint.Address}:{tcpEndPoint.Port})");
+                    //Console.WriteLine($"[TCP][TakeControl] Establishing new connection to {targetClientId} ({tcpEndPoint.Address}:{tcpEndPoint.Port})");
                     tcpClient = new TcpClient(AddressFamily.InterNetwork);
 
                     // Connect with timeout and a single retry
@@ -236,7 +236,7 @@ namespace OmniMouse.Network
                             try { tcpClient.Close(); } catch { }
                             if (attempt < 2)
                             {
-                                Console.WriteLine($"[TCP][TakeControl] Connect attempt {attempt} failed ({ex.Message}), retrying...");
+                                //Console.WriteLine($"[TCP][TakeControl] Connect attempt {attempt} failed ({ex.Message}), retrying...");
                                 Thread.Sleep(250);
                                 tcpClient = new TcpClient(AddressFamily.InterNetwork);
                             }
@@ -269,7 +269,7 @@ namespace OmniMouse.Network
                 stream.WriteTimeout = 5000;
                 stream.Write(buf, 0, buf.Length);
                 stream.Flush();
-                Console.WriteLine($"[TCP][TakeControl] Sent take-control to {targetClientId} ({tcpEndPoint.Address}) at ({localX},{localY}) dir={entryDirection}");
+                //Console.WriteLine($"[TCP][TakeControl] Sent take-control to {targetClientId} ({tcpEndPoint.Address}) at ({localX},{localY}) dir={entryDirection}");
 
                 // Wait for acknowledgment with timeout
                 stream.ReadTimeout = 5000; // 5 seconds timeout
@@ -287,7 +287,7 @@ namespace OmniMouse.Network
                     throw new InvalidOperationException($"Unexpected response: expected ACK (0x{MSG_TAKE_CONTROL_ACK:X2}), received 0x{ackBuffer[0]:X2}");
                 }
 
-                Console.WriteLine($"[TCP][TakeControl] Received acknowledgment from {targetClientId}");
+                //Console.WriteLine($"[TCP][TakeControl] Received acknowledgment from {targetClientId}");
 
                 // We are now the active Sender that forwards local input to the target.
                 // Keep hooks active and enable send-path by setting local role to Sender.
@@ -295,7 +295,7 @@ namespace OmniMouse.Network
             }
             catch (SocketException ex)
             {
-                Console.WriteLine($"[TCP][TakeControl] Socket error: {ex.Message}");
+                //Console.WriteLine($"[TCP][TakeControl] Socket error: {ex.Message}");
                 
                 // Clean up failed connection
                 lock (_tcpLock)
@@ -304,12 +304,12 @@ namespace OmniMouse.Network
                 }
                 
                 try { tcpClient?.Close(); } catch { }
-                Console.WriteLine("[TCP][TakeControl] Hints: ensure peer is running, TCP 5001 is listening, and firewall allows inbound 5001. Try: Test-NetConnection -ComputerName {0} -Port {1}", tcpEndPoint.Address, tcpEndPoint.Port);
+                //Console.WriteLine("[TCP][TakeControl] Hints: ensure peer is running, TCP 5001 is listening, and firewall allows inbound 5001. Try: Test-NetConnection -ComputerName {0} -Port {1}", tcpEndPoint.Address, tcpEndPoint.Port);
                 throw new InvalidOperationException($"Failed to establish TCP connection to {targetClientId} ({tcpEndPoint.Address}:{tcpEndPoint.Port}): {ex.Message}", ex);
             }
             catch (IOException ex)
             {
-                Console.WriteLine($"[TCP][TakeControl] IO error: {ex.Message}");
+                //Console.WriteLine($"[TCP][TakeControl] IO error: {ex.Message}");
                 
                 // Clean up failed connection
                 lock (_tcpLock)
@@ -322,7 +322,7 @@ namespace OmniMouse.Network
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[TCP][TakeControl] Unexpected error: {ex.Message}");
+                //Console.WriteLine($"[TCP][TakeControl] Unexpected error: {ex.Message}");
                 
                 // Clean up on any other error
                 lock (_tcpLock)
@@ -337,7 +337,7 @@ namespace OmniMouse.Network
 
         private void ReceiveMouseLoopUDP()
         {
-            Console.WriteLine("[UDP][RecvLoop] Enter");
+            //Console.WriteLine("[UDP][RecvLoop] Enter");
             try
             {
                 if (_udpClient == null) return;
@@ -355,7 +355,7 @@ namespace OmniMouse.Network
                         if ((DateTime.UtcNow - lastHeartbeat) >= TimeSpan.FromSeconds(5))
                         {
                             var iters = Interlocked.Read(ref _recvLoopIterations);
-                            Console.WriteLine($"[UDP][RecvLoop] alive. iterations={iters}, lastAlive={_recvLoopLastAlive:O}");
+                            //Console.WriteLine($"[UDP][RecvLoop] alive. iterations={iters}, lastAlive={_recvLoopLastAlive:O}");
                             lastHeartbeat = DateTime.UtcNow;
                         }
 
@@ -364,7 +364,7 @@ namespace OmniMouse.Network
                         if (_remoteEndPoint == null)
                         {
                             _remoteEndPoint = remoteEP;
-                            Console.WriteLine($"[UDP][RecvLoop] Learned remote endpoint: {_remoteEndPoint}");
+                            //Console.WriteLine($"[UDP][RecvLoop] Learned remote endpoint: {_remoteEndPoint}");
                         }
 
                         // Message dispatch
@@ -414,7 +414,7 @@ namespace OmniMouse.Network
                                         int deltaX = x < 0 ? x + MOVE_MOUSE_RELATIVE : x - MOVE_MOUSE_RELATIVE;
                                         int deltaY = y < 0 ? y + MOVE_MOUSE_RELATIVE : y - MOVE_MOUSE_RELATIVE;
 
-                                        Console.WriteLine($"[UDP][RecvMouse] Relative delta ({deltaX},{deltaY}) from encoded ({x},{y})");
+                                        //Console.WriteLine($"[UDP][RecvMouse] Relative delta ({deltaX},{deltaY}) from encoded ({x},{y})");
                                         
                                         // STEP 1: Capture cursor position BEFORE injection for comparison
                                         int beforeX = 0, beforeY = 0;
@@ -444,7 +444,7 @@ namespace OmniMouse.Network
                                             if (Math.Abs(_receiverLocalCursorX - expectedX) > 2 || 
                                                 Math.Abs(_receiverLocalCursorY - expectedY) > 2)
                                             {
-                                                Console.WriteLine($"[UDP][RecvMouse][DRIFT] Expected ({expectedX},{expectedY}) but actual is ({_receiverLocalCursorX},{_receiverLocalCursorY})");
+                                                //Console.WriteLine($"[UDP][RecvMouse][DRIFT] Expected ({expectedX},{expectedY}) but actual is ({_receiverLocalCursorX},{_receiverLocalCursorY})");
                                             }
                                             
 
@@ -453,13 +453,13 @@ namespace OmniMouse.Network
                                         }
                                         else
                                         {
-                                            Console.WriteLine("[UDP][RecvMouse] WARNING: GetCursorPos failed - edge detection may be inaccurate");
+                                            //Console.WriteLine("[UDP][RecvMouse] WARNING: GetCursorPos failed - edge detection may be inaccurate");
                                         }
                                     }
                                     else
                                     {
                                         // Absolute position
-                                        Console.WriteLine($"[UDP][RecvMouse] Absolute ({x},{y})");
+                                        //Console.WriteLine($"[UDP][RecvMouse] Absolute ({x},{y})");
                                         InputHooks.SuppressNextMoveFrom(x, y);
                                         SetCursorPos(x, y);
                                         
@@ -492,7 +492,7 @@ namespace OmniMouse.Network
                                 {
                                     var button = (MouseButtonNet)data[1];
                                     bool isDown = data[2] != 0;
-                                    Console.WriteLine($"[UDP][RecvBtn] {button} {(isDown ? "DOWN" : "UP")}");
+                                    //Console.WriteLine($"[UDP][RecvBtn] {button} {(isDown ? "DOWN" : "UP")}");
                                     InputHooks.InjectMouseButton(button, isDown);
                                 }
                                 break;
@@ -508,7 +508,7 @@ namespace OmniMouse.Network
                                 if (data.Length >= 1 + 4)
                                 {
                                     int delta = BitConverter.ToInt32(data, 1);
-                                    Console.WriteLine($"[UDP][RecvWheel] delta={delta}");
+                                    //Console.WriteLine($"[UDP][RecvWheel] delta={delta}");
                                     InputHooks.InjectMouseWheel(delta);
                                 }
                                 break;
@@ -528,7 +528,7 @@ namespace OmniMouse.Network
                                 {
                                     var x = BitConverter.ToInt32(data, 1);
                                     var y = BitConverter.ToInt32(data, 1 + 4);
-                                    Console.WriteLine($"[UDP][RecvLegacy] from {remoteEP.Address}:{remoteEP.Port} -> ({x},{y})");
+                                    //Console.WriteLine($"[UDP][RecvLegacy] from {remoteEP.Address}:{remoteEP.Port} -> ({x},{y})");
                                     InputHooks.SuppressNextMoveFrom(x, y);
                                     SetCursorPos(x, y);
                                 }
@@ -537,7 +537,7 @@ namespace OmniMouse.Network
                             case MSG_TAKE_CONTROL_AT:
                                 if (_remoteEndPoint != null && !remoteEP.Address.Equals(_remoteEndPoint.Address))
                                 {
-                                    Console.WriteLine($"[UDP][TakeControl][DROP] from unexpected {remoteEP.Address}");
+                                    //Console.WriteLine($"[UDP][TakeControl][DROP] from unexpected {remoteEP.Address}");
                                     break;
                                 }
 
@@ -545,7 +545,7 @@ namespace OmniMouse.Network
                                 {
                                     var ux = BitConverter.ToInt32(data, 1);
                                     var uy = BitConverter.ToInt32(data, 1 + 4);
-                                    Console.WriteLine($"[UDP][TakeControl] Received UNIVERSAL ({ux},{uy}) from {remoteEP.Address}:{remoteEP.Port}");
+                                    //Console.WriteLine($"[UDP][TakeControl] Received UNIVERSAL ({ux},{uy}) from {remoteEP.Address}:{remoteEP.Port}");
 
                                     try
                                     {
@@ -560,11 +560,13 @@ namespace OmniMouse.Network
                                         
                                         InputHooks.SuppressNextMoveFrom(pixel.X, pixel.Y);
                                         SetCursorPos(pixel.X, pixel.Y);
-                                        try { TakeControlReceived?.Invoke(pixel.X, pixel.Y); } catch (Exception ex) { Console.WriteLine($"[UDP][TakeControl] handler error: {ex.Message}"); }
+                                        try { TakeControlReceived?.Invoke(pixel.X, pixel.Y); } catch (Exception ex) {
+                                            //Console.WriteLine($"[UDP][TakeControl] handler error: {ex.Message}");
+                                        }
                                     }
                                     catch (Exception mapEx)
                                     {
-                                        Console.WriteLine($"[UDP][TakeControl] Mapping failed: {mapEx.Message}");
+                                        //Console.WriteLine($"[UDP][TakeControl] Mapping failed: {mapEx.Message}");
                                     }
                                 }
 
@@ -576,7 +578,7 @@ namespace OmniMouse.Network
                             case MSG_LAYOUT_UPDATE:
                                 if (_remoteEndPoint != null && !remoteEP.Address.Equals(_remoteEndPoint.Address))
                                 {
-                                    Console.WriteLine($"[UDP][LayoutUpdate][DROP] from unexpected {remoteEP.Address}");
+                                    //Console.WriteLine($"[UDP][LayoutUpdate][DROP] from unexpected {remoteEP.Address}");
                                     break;
                                 }
 
@@ -589,7 +591,7 @@ namespace OmniMouse.Network
                             case MSG_GRID_LAYOUT_UPDATE:
                                 if (_remoteEndPoint != null && !remoteEP.Address.Equals(_remoteEndPoint.Address))
                                 {
-                                    Console.WriteLine($"[UDP][GridLayoutUpdate][DROP] from unexpected {remoteEP.Address}");
+                                    //Console.WriteLine($"[UDP][GridLayoutUpdate][DROP] from unexpected {remoteEP.Address}");
                                     break;
                                 }
 
@@ -610,7 +612,7 @@ namespace OmniMouse.Network
                             case MSG_MONITOR_INFO:
                                 if (_remoteEndPoint != null && !remoteEP.Address.Equals(_remoteEndPoint.Address))
                                 {
-                                    Console.WriteLine($"[UDP][MonitorInfo][DROP] from unexpected {remoteEP.Address}");
+                                    //Console.WriteLine($"[UDP][MonitorInfo][DROP] from unexpected {remoteEP.Address}");
                                     break;
                                 }
 
@@ -623,7 +625,7 @@ namespace OmniMouse.Network
                             case MSG_FILE_OFFER:
                                 if (_remoteEndPoint != null && !remoteEP.Address.Equals(_remoteEndPoint.Address))
                                 {
-                                    Console.WriteLine($"[UDP][FileOffer][DROP] from unexpected {remoteEP.Address}");
+                                    //Console.WriteLine($"[UDP][FileOffer][DROP] from unexpected {remoteEP.Address}");
                                     break;
                                 }
 
@@ -643,7 +645,7 @@ namespace OmniMouse.Network
                                             {
                                                 // Update the sender IP from the remote endpoint
                                                 offer.SenderClientId = remoteEP.Address.ToString();
-                                                Console.WriteLine($"[UDP][FileOffer] Received: {offer}");
+                                                //Console.WriteLine($"[UDP][FileOffer] Received: {offer}");
                                                 
                                                 try
                                                 {
@@ -651,14 +653,14 @@ namespace OmniMouse.Network
                                                 }
                                                 catch (Exception handlerEx)
                                                 {
-                                                    Console.WriteLine($"[UDP][FileOffer] Handler error: {handlerEx.Message}");
+                                                    //Console.WriteLine($"[UDP][FileOffer] Handler error: {handlerEx.Message}");
                                                 }
                                             }
                                         }
                                     }
                                     catch (Exception ex)
                                     {
-                                        Console.WriteLine($"[UDP][FileOffer] Parse error: {ex.Message}");
+                                        //Console.WriteLine($"[UDP][FileOffer] Parse error: {ex.Message}");
                                     }
                                 }
                                 break;
@@ -678,40 +680,40 @@ namespace OmniMouse.Network
                                     var ny = BitConverter.ToSingle(data, 4);
                                     if (nx >= 0f && nx <= 1f && ny >= 0f && ny <= 1f)
                                     {
-                                        Console.WriteLine($"[UDP][RecvFallbackFloat] nx={nx:F6}, ny={ny:F6} (legacy - bitmap approach uses MSG_TAKE_CONTROL_AT)");
+                                        //Console.WriteLine($"[UDP][RecvFallbackFloat] nx={nx:F6}, ny={ny:F6} (legacy - bitmap approach uses MSG_TAKE_CONTROL_AT)");
                                     }
                                     else
                                     {
                                         var ix = BitConverter.ToInt32(data, 0);
                                         var iy = BitConverter.ToInt32(data, 4);
-                                        Console.WriteLine($"[UDP][RecvFallbackInt] -> ({ix},{iy})");
+                                        //Console.WriteLine($"[UDP][RecvFallbackInt] -> ({ix},{iy})");
                                         InputHooks.SuppressNextMoveFrom(ix, iy);
                                         SetCursorPos(ix, iy);
                                     }
                                 }
                                 else
                                 {
-                                    Console.WriteLine($"[UDP][Receive] Unknown packet type 0x{data[0]:X2}, length {data.Length} from {remoteEP.Address}:{remoteEP.Port}");
+                                    //Console.WriteLine($"[UDP][Receive] Unknown packet type 0x{data[0]:X2}, length {data.Length} from {remoteEP.Address}:{remoteEP.Port}");
                                 }
                                 break;
                         }
                     }
                     catch (ThreadAbortException)
                     {
-                        Console.WriteLine("[UDP][RecvLoop] ThreadAbortException");
+                        //Console.WriteLine("[UDP][RecvLoop] ThreadAbortException");
                         break;
                     }
                     catch (Exception ex)
                     {
                         if (!_running) break;
-                        Console.WriteLine($"[UDP][Receive] Exception: {ex.Message}");
+                        //Console.WriteLine($"[UDP][Receive] Exception: {ex.Message}");
                         Thread.Sleep(1);
                     }
                 }
             }
             finally
             {
-                Console.WriteLine("[UDP][RecvLoop] Exit");
+                //Console.WriteLine("[UDP][RecvLoop] Exit");
             }
         }
 
@@ -731,19 +733,19 @@ namespace OmniMouse.Network
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[UDP][PreFlight] Failed to send ACK: {ex.Message}");
+                //Console.WriteLine($"[UDP][PreFlight] Failed to send ACK: {ex.Message}");
             }
         }
 
         // Handle peer disconnect notification
         private void HandlePeerDisconnect(IPEndPoint remoteEP)
         {
-            Console.WriteLine($"[UDP][Disconnect] Peer {remoteEP} is disconnecting gracefully");
+            //Console.WriteLine($"[UDP][Disconnect] Peer {remoteEP} is disconnecting gracefully");
             
             // Only process if this is from our known peer
             if (_remoteEndPoint != null && !remoteEP.Address.Equals(_remoteEndPoint.Address))
             {
-                Console.WriteLine($"[UDP][Disconnect] Ignoring disconnect from unknown peer {remoteEP}");
+                //Console.WriteLine($"[UDP][Disconnect] Ignoring disconnect from unknown peer {remoteEP}");
                 return;
             }
             
@@ -777,7 +779,7 @@ namespace OmniMouse.Network
                 }
             }
             
-            Console.WriteLine("[UDP][Disconnect] State reset, ready for new connection");
+            //Console.WriteLine("[UDP][Disconnect] State reset, ready for new connection");
             
             // Notify UI/listeners about disconnect and role change
             try { PeerDisconnected?.Invoke(); } catch { }
@@ -787,13 +789,13 @@ namespace OmniMouse.Network
         // NEW handler
         private void HandleReceiverEdgeHit(IPEndPoint remoteEP)
         {
-            Console.WriteLine($"[UDP][EdgeHit] Receiver reported edge hit from {remoteEP}");
+            //Console.WriteLine($"[UDP][EdgeHit] Receiver reported edge hit from {remoteEP}");
             
             lock (_roleLock)
             {
                 if (!_handshakeComplete || _currentRole != ConnectionRole.Sender)
                 {
-                    Console.WriteLine("[UDP][EdgeHit] Not Sender, ignoring");
+                    //Console.WriteLine("[UDP][EdgeHit] Not Sender, ignoring");
                     return;
                 }
             }
@@ -891,7 +893,7 @@ namespace OmniMouse.Network
                 bool atBottomEdge = localY >= bottomInclusive - ReceiverEdgeThresholdPixels;
                 atReturnEdge = atLeftEdge || atRightEdge || atTopEdge || atBottomEdge;
                 returnEdgeDesc = atLeftEdge ? "LEFT" : atRightEdge ? "RIGHT" : atTopEdge ? "TOP" : "BOTTOM";
-                Console.WriteLine($"[UDP][RecvEdge][WARN] No entry direction known - checking all edges");
+                //Console.WriteLine($"[UDP][RecvEdge][WARN] No entry direction known - checking all edges");
             }
             
             // DEBUG: Log cursor position and proximity to return edge
@@ -917,7 +919,7 @@ namespace OmniMouse.Network
             
             if (nearReturnEdge || (now - tx._lastReceiverEdgeNotification).TotalMilliseconds >= 500)
             {
-                Console.WriteLine($"[UDP][RecvEdge][DEBUG] OS_Cursor=({localX},{localY}), VirtualScreen=({left},{top})-({rightInclusive},{bottomInclusive}), EntryDir={tx._receiverEntryDirection}, ReturnEdge={returnEdgeDesc}, NearReturn={nearReturnEdge}");
+                //Console.WriteLine($"[UDP][RecvEdge][DEBUG] OS_Cursor=({localX},{localY}), VirtualScreen=({left},{top})-({rightInclusive},{bottomInclusive}), EntryDir={tx._receiverEntryDirection}, ReturnEdge={returnEdgeDesc}, NearReturn={nearReturnEdge}");
             }
 
             if (!atReturnEdge)
@@ -934,7 +936,7 @@ namespace OmniMouse.Network
 
             tx._lastReceiverEdgeNotification = now;
 
-            Console.WriteLine($"[UDP][RecvEdge] *** EDGE HIT *** OS_Cursor=({localX},{localY}) at {returnEdgeDesc} edge (return edge for entry={tx._receiverEntryDirection}). Bounds=({left},{top})-({rightInclusive},{bottomInclusive}). Notifying Sender...");
+            //Console.WriteLine($"[UDP][RecvEdge] *** EDGE HIT *** OS_Cursor=({localX},{localY}) at {returnEdgeDesc} edge (return edge for entry={tx._receiverEntryDirection}). Bounds=({left},{top})-({rightInclusive},{bottomInclusive}). Notifying Sender...");
 
             // Send edge hit notification to Sender
             try
@@ -942,11 +944,11 @@ namespace OmniMouse.Network
                 var buf = new byte[1];
                 buf[0] = 0x22; // MSG_RECEIVER_EDGE_HIT
                 tx._udpClient?.Send(buf, buf.Length, tx._remoteEndPoint);
-                Console.WriteLine($"[UDP][RecvEdge] Sent edge hit notification to Sender at {tx._remoteEndPoint}");
+                //Console.WriteLine($"[UDP][RecvEdge] Sent edge hit notification to Sender at {tx._remoteEndPoint}");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[UDP][RecvEdge] Failed to send edge notification: {ex.Message}");
+                //Console.WriteLine($"[UDP][RecvEdge] Failed to send edge notification: {ex.Message}");
             }
         }
 
@@ -957,7 +959,7 @@ namespace OmniMouse.Network
         {
             _receiverLocalCursorX = 0;
             _receiverLocalCursorY = 0;
-            Console.WriteLine("[UDP] Receiver cursor tracking reset");
+            //Console.WriteLine("[UDP] Receiver cursor tracking reset");
         }
     }
 }
