@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using OmniMouse.Switching;
 
 namespace OmniMouse.Network
 {
@@ -12,11 +11,9 @@ namespace OmniMouse.Network
     {
         public string MachineId { get; set; } = string.Empty;
         public string DisplayName { get; set; } = string.Empty;
-        public int Position { get; set; } = -1;  // -1 = unassigned (legacy linear position)
-        public int GridX { get; set; } = -1;  // -1 = unassigned
-        public int GridY { get; set; } = -1;  // -1 = unassigned
+        public int Position { get; set; } = -1;  // -1 = unassigned
         public bool IsLocal { get; set; }
-        public bool IsPositioned => Position >= 0 || (GridX >= 0 && GridY >= 0);
+        public bool IsPositioned => Position >= 0;
 
         public ConnectedMachine Clone()
         {
@@ -25,8 +22,6 @@ namespace OmniMouse.Network
                 MachineId = MachineId,
                 DisplayName = DisplayName,
                 Position = Position,
-                GridX = GridX,
-                GridY = GridY,
                 IsLocal = IsLocal
             };
         }
@@ -34,15 +29,12 @@ namespace OmniMouse.Network
 
     /// <summary>
     /// Represents the synchronized layout of all machines in the session.
-    /// Supports both linear (Position) and 2x2 grid (GridX, GridY) layouts.
     /// </summary>
     public class SessionLayout
     {
         public List<ConnectedMachine> Machines { get; set; } = new();
         public string AuthorityMachineId { get; set; } = string.Empty;
         public DateTime LastUpdateTimestamp { get; set; } = DateTime.UtcNow;
-        public int GridWidth { get; set; } = 2;  // Default 2x2 grid
-        public int GridHeight { get; set; } = 2;
 
         /// <summary>
         /// Gets machines ordered by position.
@@ -56,49 +48,6 @@ namespace OmniMouse.Network
         public ConnectedMachine? GetMachineAtPosition(int position)
         {
             return Machines.FirstOrDefault(m => m.Position == position);
-        }
-
-        /// <summary>
-        /// Gets the machine at the specified grid coordinates, or null if empty.
-        /// </summary>
-        public ConnectedMachine? GetMachineAtGridPosition(int gridX, int gridY)
-        {
-            return Machines.FirstOrDefault(m => m.GridX == gridX && m.GridY == gridY);
-        }
-
-        /// <summary>
-        /// Gets the neighbor machine in the specified direction from the given machine.
-        /// Returns null if no neighbor exists or slot is empty.
-        /// </summary>
-        public ConnectedMachine? GetNeighbor(ConnectedMachine machine, Direction direction)
-        {
-            if (machine == null || machine.GridX < 0 || machine.GridY < 0)
-                return null;
-
-            int targetX = machine.GridX;
-            int targetY = machine.GridY;
-
-            switch (direction)
-            {
-                case Direction.Left:
-                    targetX--;
-                    break;
-                case Direction.Right:
-                    targetX++;
-                    break;
-                case Direction.Up:
-                    targetY--;
-                    break;
-                case Direction.Down:
-                    targetY++;
-                    break;
-            }
-
-            // Check bounds
-            if (targetX < 0 || targetX >= GridWidth || targetY < 0 || targetY >= GridHeight)
-                return null;
-
-            return GetMachineAtGridPosition(targetX, targetY);
         }
 
         /// <summary>
