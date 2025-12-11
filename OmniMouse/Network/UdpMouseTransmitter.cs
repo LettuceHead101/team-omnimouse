@@ -101,6 +101,9 @@ namespace OmniMouse.Network
         // Seamless switching feature toggle (true = dynamic sender claim via edge detection)
         public bool SeamlessMode { get; set; } = true;
 
+        // Seamless switching feature toggle (true = dynamic sender claim via edge detection)
+        public bool SeamlessMode { get; set; } = true;
+
         // Constructors
         public UdpMouseTransmitter()
             : this(port => new UdpClientAdapter(port)) { }
@@ -159,6 +162,44 @@ namespace OmniMouse.Network
                     // Console.WriteLine($"[UDP][MonitorSync] Deferred send failed: {ex.Message}");
                     }
 
+                // Layout after sending local monitors to peer (no change locally, but helpful log)
+                this.DumpLayoutSummary("[UDP][MonitorSync] Layout after sending local monitors to peer");
+            }
+        }
+        
+        /// <summary>
+        /// Registers the local screen map so monitors can be sent to peer after handshake.
+        /// </summary>
+        public void RegisterLocalScreenMap(VirtualScreenMap screenMap, string clientId)
+        {
+            _localScreenMap = screenMap ?? throw new ArgumentNullException(nameof(screenMap));
+            _localClientId = clientId ?? throw new ArgumentNullException(nameof(clientId));
+            Console.WriteLine($"[UDP] Registered local screen map with {screenMap.GetMonitorsSnapshot().Count} monitors for clientId={clientId}");
+
+            // Emit consolidated layout summary immediately after local registration
+            this.DumpLayoutSummary("[UDP][MonitorSync] Layout after local monitors registered");
+
+            // Process any queued monitor packets that arrived before screen map was ready
+            lock (_monitorSyncLock)
+            {
+                if (_pendingMonitorPackets.Count > 0)
+                {
+                    Console.WriteLine($"[UDP][MonitorSync] Processing {_pendingMonitorPackets.Count} queued monitor packet(s)");
+                    while (_pendingMonitorPackets.Count > 0)
+                    {
+                        var (data, offset, source) = _pendingMonitorPackets.Dequeue();
+                        HandleMonitorInfo(data, offset);
+                    }
+                }
+            }
+
+            // If handshake already completed, attempt to send monitor info now (previous attempt may have been skipped).
+            bool ready;
+            lock (_roleLock) ready = _handshakeComplete;
+            if (ready)
+            {
+                Console.WriteLine("[UDP][MonitorSync] Handshake complete; sending monitors after late registration.");
+                try { SendMonitorInfo(); } catch (Exception ex) { Console.WriteLine($"[UDP][MonitorSync] Deferred send failed: {ex.Message}"); }
                 // Layout after sending local monitors to peer (no change locally, but helpful log)
                 this.DumpLayoutSummary("[UDP][MonitorSync] Layout after sending local monitors to peer");
             }
