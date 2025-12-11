@@ -45,6 +45,7 @@ namespace OmniMouse.Network
         private const byte MSG_TAKE_CONTROL_ACK = 0x06;
         private const byte MSG_MOUSE_BUTTON = 0x07; // Mouse button down/up
         private const byte MSG_MOUSE_WHEEL = 0x08;  // Mouse wheel delta
+        private const byte MSG_RECEIVER_EDGE_HIT = 0x22; // Receiver hit edge notification
         private const byte MSG_LAYOUT_ANNOUNCE = 0x40;  // Machine announces position choice
         private const byte MSG_LAYOUT_SYNC = 0x41;      // Full layout broadcast
         private const byte MSG_LAYOUT_UPDATE = 0x42;    // Single machine position update

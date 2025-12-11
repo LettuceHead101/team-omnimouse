@@ -178,5 +178,110 @@ namespace OmniMouse.Network
             var localEp = _udpClient?.Client.LocalEndPoint as IPEndPoint;
             return $"{localEp?.Address}:{localEp?.Port}";
         }
+
+        /// <summary>
+        /// Sends a grid-based layout update (2x2 or larger grids).
+        /// Format: [MSG_GRID_LAYOUT_UPDATE][gridX:int32][gridY:int32][machineIdLength:int32][machineId:UTF8][displayNameLength:int32][displayName:UTF8]
+        /// </summary>
+        public void SendGridLayoutUpdate(string machineId, string displayName, int gridX, int gridY)
+        {
+            if (_udpClient == null || _remoteEndPoint == null)
+            {
+                Console.WriteLine("[UdpMouse][Layout] Cannot send grid layout update - not connected");
+                return;
+            }
+
+            try
+            {
+                var machineIdBytes = Encoding.UTF8.GetBytes(machineId);
+                var displayNameBytes = Encoding.UTF8.GetBytes(displayName);
+
+                var packet = new byte[1 + 4 + 4 + 4 + machineIdBytes.Length + 4 + displayNameBytes.Length];
+                int offset = 0;
+
+                packet[offset++] = MSG_GRID_LAYOUT_UPDATE;
+
+                BitConverter.GetBytes(gridX).CopyTo(packet, offset);
+                offset += 4;
+
+                BitConverter.GetBytes(gridY).CopyTo(packet, offset);
+                offset += 4;
+
+                BitConverter.GetBytes(machineIdBytes.Length).CopyTo(packet, offset);
+                offset += 4;
+
+                machineIdBytes.CopyTo(packet, offset);
+                offset += machineIdBytes.Length;
+
+                BitConverter.GetBytes(displayNameBytes.Length).CopyTo(packet, offset);
+                offset += 4;
+
+                displayNameBytes.CopyTo(packet, offset);
+
+                _udpClient.Send(packet, packet.Length, _remoteEndPoint);
+
+                Console.WriteLine($"[UdpMouse][Layout] Sent grid layout update: {displayName} at ({gridX}, {gridY})");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[UdpMouse][Layout] Error sending grid layout update: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Handles incoming MSG_GRID_LAYOUT_UPDATE messages.
+        /// Format: [MSG_GRID_LAYOUT_UPDATE][gridX:int32][gridY:int32][machineIdLength:int32][machineId:UTF8][displayNameLength:int32][displayName:UTF8]
+        /// </summary>
+        private void HandleGridLayoutUpdate(byte[] packet, int offset)
+        {
+            if (_layoutCoordinator == null)
+            {
+                Console.WriteLine("[UdpMouse][Layout] Received grid layout update but coordinator not initialized");
+                return;
+            }
+
+            try
+            {
+                // Parse: [gridX:int32][gridY:int32][machineIdLength:int32][machineId:UTF8][displayNameLength:int32][displayName:UTF8]
+                int gridX = BitConverter.ToInt32(packet, offset);
+                offset += 4;
+
+                int gridY = BitConverter.ToInt32(packet, offset);
+                offset += 4;
+
+                int machineIdLength = BitConverter.ToInt32(packet, offset);
+                offset += 4;
+
+                string machineId = Encoding.UTF8.GetString(packet, offset, machineIdLength);
+                offset += machineIdLength;
+
+                int displayNameLength = BitConverter.ToInt32(packet, offset);
+                offset += 4;
+
+                string displayName = Encoding.UTF8.GetString(packet, offset, displayNameLength);
+
+                Console.WriteLine($"[UdpMouse][Layout] Received grid layout update: {displayName} at ({gridX}, {gridY})");
+
+                // TODO: Apply grid position to layout coordinator when grid layout support is added
+                // For now, log the received grid position
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[UdpMouse][Layout] Error handling grid layout update: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Resets the layout coordinator on disconnect.
+        /// </summary>
+        private void ResetLayoutCoordinator()
+        {
+            if (_layoutCoordinator != null)
+            {
+                _layoutCoordinator.LayoutChanged -= OnLayoutChangedHandler;
+                _layoutCoordinator = null;
+                Console.WriteLine("[UdpMouse][Layout] Layout coordinator reset");
+            }
+        }
     }
 }

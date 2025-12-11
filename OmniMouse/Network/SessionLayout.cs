@@ -119,5 +119,33 @@ namespace OmniMouse.Network
         {
             return OrderedMachines.Select(m => m.MachineId).ToArray();
         }
+
+        /// <summary>
+        /// Gets the neighbor machine in the specified direction.
+        /// For linear layouts, only left/right are supported.
+        /// </summary>
+        public ConnectedMachine? GetNeighbor(ConnectedMachine machine, OmniMouse.Switching.Direction direction)
+        {
+            if (!machine.IsPositioned) return null;
+
+            // For linear (1D) layout, only left/right make sense
+            switch (direction)
+            {
+                case OmniMouse.Switching.Direction.Right:
+                    return GetMachineAtPosition(machine.Position + 1);
+                    
+                case OmniMouse.Switching.Direction.Left:
+                    return GetMachineAtPosition(machine.Position - 1);
+                    
+                case OmniMouse.Switching.Direction.Up:
+                case OmniMouse.Switching.Direction.Down:
+                    // For 1D layouts, up/down don't have neighbors
+                    // For 2D grid layouts, this would need grid dimensions
+                    return null;
+                    
+                default:
+                    return null;
+            }
+        }
     }
 }
