@@ -670,40 +670,6 @@ namespace OmniMouse.Network
                                 HandleReceiverEdgeHit(remoteEP);
                                 break;
 
-                            case MSG_LAYOUT_UPDATE:
-                                if (_remoteEndPoint != null && !remoteEP.Address.Equals(_remoteEndPoint.Address))
-                                {
-                                    Console.WriteLine($"[UDP][LayoutUpdate][DROP] from unexpected {remoteEP.Address}");
-                                    break;
-                                }
-
-                                if (data.Length > 1)
-                                {
-                                    HandleLayoutUpdate(data, 1);
-                                }
-                                break;
-
-                            case MSG_KEYBOARD_DOWN:
-                                HandleKeyboardDown(data, remoteEP);
-                                break;
-
-                            case MSG_KEYBOARD_UP:
-                                HandleKeyboardUp(data, remoteEP);
-                                break;
-
-                            case MSG_MONITOR_INFO:
-                                if (_remoteEndPoint != null && !remoteEP.Address.Equals(_remoteEndPoint.Address))
-                                {
-                                    Console.WriteLine($"[UDP][MonitorInfo][DROP] from unexpected {remoteEP.Address}");
-                                    break;
-                                }
-
-                                if (data.Length > 1)
-                                {
-                                    HandleMonitorInfo(data, 1);
-                                }
-                                break;
-
                             default:
                                 if (_remoteEndPoint != null && !remoteEP.Address.Equals(_remoteEndPoint.Address))
                                     break;

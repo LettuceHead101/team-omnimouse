@@ -13,6 +13,7 @@ using TargetHooks = OmniMouse.Hooks.InputHooks;
 namespace NetworkTestProject1.Hooks
 {
     [TestClass]
+    [DoNotParallelize]
     public class KeyboardTests
     {
         // Static lock to synchronize test execution and prevent interference
