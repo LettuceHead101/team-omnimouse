@@ -394,7 +394,7 @@ namespace OmniMouse.Hooks
             // Get remote bounds to check if sender's remote cursor is at return edge
             if (!TryGetRemoteBounds(out int rLeft, out int rTop, out int rRight, out int rBottom))
             {
-                Console.WriteLine("[HOOK][EdgeReturn] Cannot get remote bounds - aborting edge return");
+                //Console.WriteLine("[HOOK][EdgeReturn] Cannot get remote bounds - aborting edge return");
                 return;
             }
 
@@ -442,19 +442,19 @@ namespace OmniMouse.Hooks
             if (!senderAtReturnEdge)
             {
                 // Sender's remote cursor not yet at return edge
-                Console.WriteLine($"[HOOK][EdgeReturn] Receiver at edge, but Sender remote cursor at ({senderX},{senderY}) not at {returnEdgeDesc} edge yet. Bounds=({rLeft},{rTop})-({rRightInclusive},{rBottomInclusive})");
+                //Console.WriteLine($"[HOOK][EdgeReturn] Receiver at edge, but Sender remote cursor at ({senderX},{senderY}) not at {returnEdgeDesc} edge yet. Bounds=({rLeft},{rTop})-({rRightInclusive},{rBottomInclusive})");
                 return;
             }
 
             // Check accumulator threshold (smooth out jitter)
             if (_remoteStreamingReleaseAccum < RemoteReleaseThresholdPixels)
             {
-                Console.WriteLine($"[HOOK][EdgeReturn] Both at edge, but accumulator only at {_remoteStreamingReleaseAccum}px (need {RemoteReleaseThresholdPixels}px)");
+                //Console.WriteLine($"[HOOK][EdgeReturn] Both at edge, but accumulator only at {_remoteStreamingReleaseAccum}px (need {RemoteReleaseThresholdPixels}px)");
                 return;
             }
 
             // SUCCESS: Both Sender and Receiver agree they're at the return edge
-            Console.WriteLine($"[HOOK][EdgeReturn] MUTUAL AGREEMENT! Sender remote at ({senderX},{senderY}), Receiver also at return edge. Accumulator: {_remoteStreamingReleaseAccum}px. ENDING STREAM");
+            //Console.WriteLine($"[HOOK][EdgeReturn] MUTUAL AGREEMENT! Sender remote at ({senderX},{senderY}), Receiver also at return edge. Accumulator: {_remoteStreamingReleaseAccum}px. ENDING STREAM");
             
             // Reset flags
             _receiverReportedEdgeHit = false;
@@ -512,7 +512,7 @@ namespace OmniMouse.Hooks
             var preflightSendFunc = SendPreFlightRequestImpl ?? SendPreFlightRequest;
             if (!preflightSendFunc(tx))
             {
-                Console.WriteLine("[HOOK][EdgeClaim] Failed to send preflight request");
+                //Console.WriteLine("[HOOK][EdgeClaim] Failed to send preflight request");
                 return;
             }
 
@@ -520,7 +520,7 @@ namespace OmniMouse.Hooks
             var preflightWaitFunc = WaitForPreFlightAckImpl ?? WaitForPreFlightAck;
             if (!preflightWaitFunc(PreFlightTimeoutMs))
             {
-                Console.WriteLine($"[HOOK][EdgeClaim] Preflight timeout after {PreFlightTimeoutMs}ms - aborting switch");
+                //Console.WriteLine($"[HOOK][EdgeClaim] Preflight timeout after {PreFlightTimeoutMs}ms - aborting switch");
                 return;
             }
 
@@ -623,7 +623,7 @@ namespace OmniMouse.Hooks
                 if (universalY < 0) universalY = 0;
                 if (universalY > UniversalMax) universalY = UniversalMax;
 
-                Console.WriteLine($"[HOOK][EdgeClaim] HIT {dir}. Global:({finalGlobalX},{finalGlobalY}). Relative:({relX},{relY}). SENDING UNIVERSAL:({universalX},{universalY})");
+                //Console.WriteLine($"[HOOK][EdgeClaim] HIT {dir}. Global:({finalGlobalX},{finalGlobalY}). Relative:({relX},{relY}). SENDING UNIVERSAL:({universalX},{universalY})");
 
                 BeginRemoteStreaming(dir);
                 try
@@ -633,7 +633,7 @@ namespace OmniMouse.Hooks
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"[HOOK][EdgeClaim] SendTakeControl failed: {ex.Message}");
+                    //Console.WriteLine($"[HOOK][EdgeClaim] SendTakeControl failed: {ex.Message}");
                     EndRemoteStreaming();
                 }
             }
@@ -701,7 +701,7 @@ namespace OmniMouse.Hooks
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[HOOK][PreFlight] Send failed: {ex.Message}");
+                //Console.WriteLine($"[HOOK][PreFlight] Send failed: {ex.Message}");
                 return false;
             }
         }
@@ -742,7 +742,7 @@ namespace OmniMouse.Hooks
         internal static void NotifyReceiverEdgeHit()
         {
             _receiverReportedEdgeHit = true;
-            Console.WriteLine("[HOOK] Receiver edge hit notification received");
+            //Console.WriteLine("[HOOK] Receiver edge hit notification received");
         }
 
         // Helper: Get Receiver's LOCAL screen bounds (what Receiver sees locally)
@@ -765,11 +765,11 @@ namespace OmniMouse.Hooks
                 var buf = new byte[1];
                 buf[0] = MSG_RECEIVER_EDGE_HIT;  // 0x22
                 tx.SendDirect(buf, buf.Length);
-                Console.WriteLine("[HOOK] Sent edge hit notification to Sender");
+                //Console.WriteLine("[HOOK] Sent edge hit notification to Sender");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[HOOK] Failed to notify Sender of edge hit: {ex.Message}");
+                //Console.WriteLine($"[HOOK] Failed to notify Sender of edge hit: {ex.Message}");
             }
         }
     }

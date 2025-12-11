@@ -50,7 +50,7 @@ namespace OmniMouse.Network.FileShare
             // Handle duplicate filenames
             destinationPath = GetUniqueFilePath(destinationPath);
 
-            Console.WriteLine($"[FileTransferClient] Connecting to {hostIp}:{hostPort} for FileID: {fileId:N}");
+            //Console.WriteLine($"[FileTransferClient] Connecting to {hostIp}:{hostPort} for FileID: {fileId:N}");
 
             using var client = new TcpClient();
             await client.ConnectAsync(hostIp, hostPort, cancellationToken).ConfigureAwait(false);
@@ -61,7 +61,7 @@ namespace OmniMouse.Network.FileShare
             var fileIdBytes = fileId.ToByteArray();
             await stream.WriteAsync(fileIdBytes, 0, 16, cancellationToken).ConfigureAwait(false);
 
-            Console.WriteLine($"[FileTransferClient] Sent FileID: {fileId:N}");
+            //Console.WriteLine($"[FileTransferClient] Sent FileID: {fileId:N}");
 
             // Read status (1 byte)
             var statusBuffer = new byte[1];
@@ -75,7 +75,7 @@ namespace OmniMouse.Network.FileShare
             if (!success)
                 throw new InvalidOperationException($"Server rejected file request for FileID: {fileId:N}");
 
-            Console.WriteLine($"[FileTransferClient] Server accepted request. Downloading to: {destinationPath}");
+            //Console.WriteLine($"[FileTransferClient] Server accepted request. Downloading to: {destinationPath}");
 
             // Stream file data to disk
             await using var fileStream = new FileStream(
@@ -101,7 +101,7 @@ namespace OmniMouse.Network.FileShare
                 progress?.Report(totalBytesRead);
             }
 
-            Console.WriteLine($"[FileTransferClient] Download complete: {safeFileName} ({totalBytesRead:N0} bytes)");
+            //Console.WriteLine($"[FileTransferClient] Download complete: {safeFileName} ({totalBytesRead:N0} bytes)");
 
             return destinationPath;
         }
@@ -140,7 +140,7 @@ namespace OmniMouse.Network.FileShare
             // Handle duplicate filenames
             destinationPath = GetUniqueFilePath(destinationPath);
 
-            Console.WriteLine($"[FileTransferClient] Connecting to {hostIp}:{hostPort} for FileID: {fileId:N}");
+            //Console.WriteLine($"[FileTransferClient] Connecting to {hostIp}:{hostPort} for FileID: {fileId:N}");
 
             using var client = new TcpClient();
             await client.ConnectAsync(hostIp, hostPort, cancellationToken).ConfigureAwait(false);
@@ -151,7 +151,7 @@ namespace OmniMouse.Network.FileShare
             var fileIdBytes = fileId.ToByteArray();
             await stream.WriteAsync(fileIdBytes, 0, 16, cancellationToken).ConfigureAwait(false);
 
-            Console.WriteLine($"[FileTransferClient] Sent FileID: {fileId:N}");
+            //Console.WriteLine($"[FileTransferClient] Sent FileID: {fileId:N}");
 
             // Read status (1 byte)
             var statusBuffer = new byte[1];
@@ -165,7 +165,7 @@ namespace OmniMouse.Network.FileShare
             if (!success)
                 throw new InvalidOperationException($"Server rejected file request for FileID: {fileId:N}");
 
-            Console.WriteLine($"[FileTransferClient] Server accepted request. Downloading to: {destinationPath}");
+            //Console.WriteLine($"[FileTransferClient] Server accepted request. Downloading to: {destinationPath}");
 
             // Stream file data to disk
             await using var fileStream = new FileStream(
@@ -191,7 +191,7 @@ namespace OmniMouse.Network.FileShare
                 progress?.Report(totalBytesRead);
             }
 
-            Console.WriteLine($"[FileTransferClient] Download complete: {safeFileName} ({totalBytesRead:N0} bytes)");
+            //Console.WriteLine($"[FileTransferClient] Download complete: {safeFileName} ({totalBytesRead:N0} bytes)");
 
             return destinationPath;
         }

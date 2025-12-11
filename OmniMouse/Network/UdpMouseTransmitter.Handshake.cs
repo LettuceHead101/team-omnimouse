@@ -16,7 +16,7 @@ namespace OmniMouse.Network
             _hsNoncePeer = 0;
             _hsInProgress = true;
 
-            Console.WriteLine($"[UDP][Handshake] Begin v{ProtocolVersion}, nonce={_hsNonceLocal}, localId={_localLowestIpV4}");
+            //Console.WriteLine($"[UDP][Handshake] Begin v{ProtocolVersion}, nonce={_hsNonceLocal}, localId={_localLowestIpV4}");
 
             _hsTimer = new Timer(HandshakeTimerCallback, null, TimeSpan.Zero, Timeout.InfiniteTimeSpan);
         }
@@ -27,7 +27,7 @@ namespace OmniMouse.Network
             {
                 if (_udpClient == null || _remoteEndPoint == null)
                 {
-                    Console.WriteLine("[UDP][Handshake] No UDP or remote endpoint; stopping retries.");
+                    //Console.WriteLine("[UDP][Handshake] No UDP or remote endpoint; stopping retries.");
                     CancelHandshakeTimer();
                     return;
                 }
@@ -51,7 +51,7 @@ namespace OmniMouse.Network
 
                 if (_hsAttempts >= 10)
                 {
-                    Console.WriteLine("[UDP][Handshake] Max attempts reached; giving up for now.");
+                    //Console.WriteLine("[UDP][Handshake] Max attempts reached; giving up for now.");
                     CancelHandshakeTimer();
                     return;
                 }
@@ -65,7 +65,7 @@ namespace OmniMouse.Network
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[UDP][Handshake] Timer error: {ex.Message}");
+                //Console.WriteLine($"[UDP][Handshake] Timer error: {ex.Message}");
             }
         }
 
@@ -103,11 +103,11 @@ namespace OmniMouse.Network
             try
             {
                 _udpClient.Send(buf.ToArray(), o, _remoteEndPoint);
-                Console.WriteLine($"[UDP][Handshake] -> Request v{ProtocolVersion} nonce={_hsNonceLocal}, prefRole={prefRole}, localId={_localLowestIpV4}");
+                //Console.WriteLine($"[UDP][Handshake] -> Request v{ProtocolVersion} nonce={_hsNonceLocal}, prefRole={prefRole}, localId={_localLowestIpV4}");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[UDP][Handshake] Failed to send request: {ex.Message}");
+                //Console.WriteLine($"[UDP][Handshake] Failed to send request: {ex.Message}");
             }
         }
 
@@ -117,7 +117,7 @@ namespace OmniMouse.Network
             var version = data[1];
             if (version != ProtocolVersion)
             {
-                Console.WriteLine($"[UDP][Handshake][WARN] Version mismatch {version}!={ProtocolVersion} from {packetRemote.Address}; ignoring.");
+                //Console.WriteLine($"[UDP][Handshake][WARN] Version mismatch {version}!={ProtocolVersion} from {packetRemote.Address}; ignoring.");
                 return;
             }
 
@@ -135,7 +135,7 @@ namespace OmniMouse.Network
             {
                 if (_remoteEndPoint != null && !packetRemote.Address.Equals(_remoteEndPoint.Address))
                 {
-                    Console.WriteLine($"[UDP][Handshake][DROP] Request from unexpected {packetRemote.Address}; expected {_remoteEndPoint.Address}");
+                    //Console.WriteLine($"[UDP][Handshake][DROP] Request from unexpected {packetRemote.Address}; expected {_remoteEndPoint.Address}");
                     drop = true;
                 }
                 else
@@ -144,7 +144,7 @@ namespace OmniMouse.Network
                     {
                         _remoteEndPoint = new IPEndPoint(packetRemote.Address.MapToIPv4(), UdpPort);
                         learnedEndpoint = true;
-                        Console.WriteLine($"[UDP] Remote endpoint learned: {_remoteEndPoint.Address}:{_remoteEndPoint.Port}");
+                        //Console.WriteLine($"[UDP] Remote endpoint learned: {_remoteEndPoint.Address}:{_remoteEndPoint.Port}");
                     }
 
                     // Seamless mode: initial handshake no longer assigns Sender based on IP.
@@ -158,7 +158,7 @@ namespace OmniMouse.Network
             if (drop) return;
             if (sendEndpoint == null) return;
 
-            Console.WriteLine($"[UDP][Handshake] Request from {packetRemote.Address} v{version} nonceA={nonceA}, peerPref={initiatorPrefRole}, peerId={initiatorLocalIp} -> negotiated localRole={negotiatedLocalRole}");
+            //Console.WriteLine($"[UDP][Handshake] Request from {packetRemote.Address} v{version} nonceA={nonceA}, peerPref={initiatorPrefRole}, peerId={initiatorLocalIp} -> negotiated localRole={negotiatedLocalRole}");
 
             _hsNoncePeer = RandomNonce();
             var accept = new byte[27];
@@ -178,7 +178,7 @@ namespace OmniMouse.Network
             try
             {
                 _udpClient?.Send(accept, o, sendEndpoint);
-                Console.WriteLine($"[UDP][Handshake] <- Accept v{ProtocolVersion} echo={nonceA}, nonceB={_hsNoncePeer}, responderRole={negotiatedLocalRole}, responderId={localId}, initiatorIdEcho={initiatorLocalIp}");
+                //Console.WriteLine($"[UDP][Handshake] <- Accept v{ProtocolVersion} echo={nonceA}, nonceB={_hsNoncePeer}, responderRole={negotiatedLocalRole}, responderId={localId}, initiatorIdEcho={initiatorLocalIp}");
 
                 lock (_roleLock)
                 {
@@ -199,7 +199,7 @@ namespace OmniMouse.Network
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[UDP][Handshake] Failed to send acceptance: {ex.Message}");
+                //Console.WriteLine($"[UDP][Handshake] Failed to send acceptance: {ex.Message}");
 
                 if (learnedEndpoint)
                 {
@@ -208,7 +208,7 @@ namespace OmniMouse.Network
                         if (_remoteEndPoint != null && _remoteEndPoint.Address.Equals(sendEndpoint.Address))
                         {
                             _remoteEndPoint = null;
-                            Console.WriteLine("[UDP][Handshake] Cleared learned remote endpoint due to send failure.");
+                            //Console.WriteLine("[UDP][Handshake] Cleared learned remote endpoint due to send failure.");
                         }
                     }
                 }
@@ -221,20 +221,20 @@ namespace OmniMouse.Network
             var version = data[1];
             if (version != ProtocolVersion)
             {
-                Console.WriteLine($"[UDP][Handshake][WARN] Accept version mismatch {version}!={ProtocolVersion} from {packetRemote.Address}; ignoring.");
+                //Console.WriteLine($"[UDP][Handshake][WARN] Accept version mismatch {version}!={ProtocolVersion} from {packetRemote.Address}; ignoring.");
                 return;
             }
 
             if (_remoteEndPoint != null && !packetRemote.Address.Equals(_remoteEndPoint.Address))
             {
-                Console.WriteLine($"[UDP][Handshake][DROP] Accept from unexpected {packetRemote.Address}; expected {_remoteEndPoint.Address}");
+                //Console.WriteLine($"[UDP][Handshake][DROP] Accept from unexpected {packetRemote.Address}; expected {_remoteEndPoint.Address}");
                 return;
             }
 
             var nonceEcho = BitConverter.ToInt64(data, 2);
             if (nonceEcho != _hsNonceLocal)
             {
-                Console.WriteLine($"[UDP][Handshake][DROP] Accept nonce mismatch echo={nonceEcho} expected={_hsNonceLocal} from {packetRemote.Address}");
+                //Console.WriteLine($"[UDP][Handshake][DROP] Accept nonce mismatch echo={nonceEcho} expected={_hsNonceLocal} from {packetRemote.Address}");
                 return;
             }
 
@@ -246,7 +246,7 @@ namespace OmniMouse.Network
             if (_remoteEndPoint == null)
             {
                 _remoteEndPoint = new IPEndPoint(packetRemote.Address.MapToIPv4(), UdpPort);
-                Console.WriteLine($"[UDP] Remote endpoint learned on accept: {_remoteEndPoint.Address}:{_remoteEndPoint.Port}");
+                //Console.WriteLine($"[UDP] Remote endpoint learned on accept: {_remoteEndPoint.Address}:{_remoteEndPoint.Port}");
             }
 
             var localId = _localLowestIpV4 ?? IPAddress.Parse("0.0.0.0");
@@ -259,7 +259,7 @@ namespace OmniMouse.Network
                 _handshakeComplete = true;
             }
 
-            Console.WriteLine($"[UDP][Handshake] Accept from {packetRemote.Address} v{version} echo={nonceEcho}, nonceB={_hsNoncePeer}, responderRole={responderRole}, responderId={responderLocalIp}, initiatorIdEcho={initiatorLocalIpEcho} -> negotiated localRole={negotiatedLocalRole}");
+            //Console.WriteLine($"[UDP][Handshake] Accept from {packetRemote.Address} v{version} echo={nonceEcho}, nonceB={_hsNoncePeer}, responderRole={responderRole}, responderId={responderLocalIp}, initiatorIdEcho={initiatorLocalIpEcho} -> negotiated localRole={negotiatedLocalRole}");
 
             CancelHandshakeTimer();
 
