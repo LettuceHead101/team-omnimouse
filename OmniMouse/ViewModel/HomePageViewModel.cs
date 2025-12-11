@@ -227,13 +227,18 @@ namespace OmniMouse.ViewModel
         {
             // Create and populate the virtual screen map
             var map = new VirtualScreenMap();
-            var clientId = Guid.NewGuid().ToString();
+            
+            // Generate client ID based on actual IP address for consistency
+            var clientId = GenerateClientIdFromLocalIp();
             
             // Discover local monitors and add them to the map
             PopulateLocalMonitors(map, clientId);
             
             // Register the screen map with UDP transmitter for monitor synchronization
             udp.RegisterLocalScreenMap(map, clientId);
+            
+            // Log the client ID being used
+            WriteToConsole($"[UI] Client ID set: {clientId}");
             
             var inputCoordinator = new InputCoordinator(map, udp, clientId);
             
@@ -289,6 +294,36 @@ namespace OmniMouse.ViewModel
             _hooks.InstallHooks();
             var thread = new Thread(_hooks.RunMessagePump) { IsBackground = true };
             thread.Start();
+        }
+
+        private string GenerateClientIdFromLocalIp()
+        {
+            try
+            {
+                // Get lowest local IPv4 address (matching UdpMouseTransmitter._localLowestIpV4 logic)
+                var host = System.Net.Dns.GetHostEntry(System.Net.Dns.GetHostName());
+                var localIp = host.AddressList
+                    .Where(ip => ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork 
+                              && !IPAddress.IsLoopback(ip) 
+                              && !ip.ToString().StartsWith("169.254.")) // Exclude link-local
+                    .OrderBy(ip => ip.GetAddressBytes()[0])
+                    .ThenBy(ip => ip.GetAddressBytes()[1])
+                    .ThenBy(ip => ip.GetAddressBytes()[2])
+                    .ThenBy(ip => ip.GetAddressBytes()[3])
+                    .FirstOrDefault();
+                
+                if (localIp != null)
+                {
+                    return $"{localIp}:5000";
+                }
+            }
+            catch (Exception ex)
+            {
+                WriteToConsole($"[UI] Warning: Could not determine local IP: {ex.Message}");
+            }
+            
+            // Fallback to GUID if IP detection fails
+            return Guid.NewGuid().ToString();
         }
 
         private void PopulateLocalMonitors(VirtualScreenMap map, string clientId)
@@ -433,15 +468,16 @@ namespace OmniMouse.ViewModel
                 {
                     StartHooks(_udp);
                     WriteToConsole($"[UI][RoleConfirm] {role}: hooks installed for edge detection.");
+                    
+                    // Only show layout dialog when hooks are first installed
+                    if (!_layoutConfigured && !_layoutDialogActive)
+                    {
+                        ShowLayoutSelectionDialog();
+                    }
                 }
                 else
                 {
                     WriteToConsole($"[UI][RoleConfirm] {role}: hooks already installed.");
-                }
-
-                if (!_layoutConfigured) // <--- ADD CHECK
-                {
-                    ShowLayoutSelectionDialog();
                 }
             }));
         }
