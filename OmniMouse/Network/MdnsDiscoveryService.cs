@@ -176,13 +176,6 @@ namespace OmniMouse.Network
                 var serviceName = e.ServiceInstanceName.ToString();
                 Console.WriteLine($"[mDNS] Discovered service instance: {serviceName}");
 
-                // Filter: Only process _omnimouse._udp services, ignore other services
-                if (!serviceName.Contains(ServiceType))
-                {
-                    Console.WriteLine($"[mDNS] Ignoring non-OmniMouse service: {serviceName}");
-                    return;
-                }
-
                 // Extract machine ID from TXT records
                 var txtRecords = e.Message.AdditionalRecords
                     .OfType<TXTRecord>()
@@ -227,14 +220,6 @@ namespace OmniMouse.Network
 
                 var peerIp = aRecord.Address;
                 var peerEndpoint = new IPEndPoint(peerIp, UdpPort);
-
-                // Self-filter by IP: ignore if this is our own IP address
-                var localIp = GetLocalIPv4Address();
-                if (localIp != null && peerIp.Equals(localIp))
-                {
-                    Console.WriteLine($"[mDNS] Ignoring self-advertisement by IP (Our IP: {localIp}, Discovered: {peerIp})");
-                    return;
-                }
 
                 // Track discovered peer
                 if (_discoveredPeerIds.Add(peerMachineId))

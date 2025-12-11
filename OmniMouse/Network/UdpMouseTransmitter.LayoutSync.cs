@@ -276,34 +276,7 @@ namespace OmniMouse.Network
         /// </summary>
         public string GetLocalMachineId()
         {
-            // Return the stored client ID if available (set during RegisterLocalScreenMap)
-            if (!string.IsNullOrEmpty(_localClientId))
-            {
-                return _localClientId;
-            }
-
-            // Fallback: try to get actual local IP instead of 0.0.0.0
             var localEp = _udpClient?.Client.LocalEndPoint as IPEndPoint;
-            if (localEp != null && localEp.Address.ToString() == "0.0.0.0")
-            {
-                // Get actual local IP address
-                try
-                {
-                    var host = System.Net.Dns.GetHostEntry(System.Net.Dns.GetHostName());
-                    var actualLocalIp = host.AddressList
-                        .FirstOrDefault(ip => ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork 
-                                            && !System.Net.IPAddress.IsLoopback(ip));
-                    if (actualLocalIp != null)
-                    {
-                        return $"{actualLocalIp}:{localEp.Port}";
-                    }
-                }
-                catch
-                {
-                    // Fall through to default
-                }
-            }
-            
             return $"{localEp?.Address}:{localEp?.Port}";
         }
     }
