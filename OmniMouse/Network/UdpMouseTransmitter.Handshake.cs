@@ -187,8 +187,9 @@ namespace OmniMouse.Network
                 }
 
                 // Initialize layout coordinator after handshake completes
-                var localEp = _udpClient?.Client.LocalEndPoint as IPEndPoint;
-                var localMachineId = $"{localEp?.Address}:{localEp?.Port}";
+                // Use _localLowestIpV4 instead of UDP endpoint (which shows 0.0.0.0 when binding to all interfaces)
+                var localIp = _localLowestIpV4 ?? IPAddress.Parse("127.0.0.1");
+                var localMachineId = $"{localIp}:{UdpPort}";
                 var remoteMachineId = $"{sendEndpoint.Address}:{sendEndpoint.Port}";
                 InitializeLayoutCoordinator(localMachineId, remoteMachineId);
 
@@ -264,8 +265,9 @@ namespace OmniMouse.Network
             CancelHandshakeTimer();
 
             // Initialize layout coordinator after handshake completes
-            var localEp = _udpClient?.Client.LocalEndPoint as IPEndPoint;
-            var localMachineId = $"{localEp?.Address}:{localEp?.Port}";
+            // Use _localLowestIpV4 instead of UDP endpoint (which shows 0.0.0.0 when binding to all interfaces)
+            var localIp = _localLowestIpV4 ?? IPAddress.Parse("127.0.0.1");
+            var localMachineId = $"{localIp}:{UdpPort}";
             var remoteMachineId = $"{_remoteEndPoint.Address}:{_remoteEndPoint.Port}";
             InitializeLayoutCoordinator(localMachineId, remoteMachineId);
 
