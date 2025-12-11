@@ -72,12 +72,14 @@ namespace OmniMouse.Views
             // Get the target position from the dropped-on item
             if (sender is FrameworkElement element && element.DataContext is MachinePositionItem targetItem)
             {
-                int targetPosition = targetItem.Position;
+                // Use grid coordinates instead of linear position
+                int targetGridX = targetItem.GridX;
+                int targetGridY = targetItem.GridY;
 
                 // Allow dropping any machine on any position
                 if (DataContext is LayoutSelectionViewModel vm)
                 {
-                    vm.MoveMachine(_draggedItem.MachineId, targetPosition);
+                    vm.MoveMachineToGrid(_draggedItem.MachineId, targetGridX, targetGridY);
                 }
             }
 

@@ -2,18 +2,34 @@
 using System.IO;
 using System.Text;
 using System.Windows;
+using OmniMouse.Configuration;
 
 namespace OmniMouse
 {
     public partial class App : Application
     {
+        public static AppSettings Settings { get; private set; } = new AppSettings();
         public static event Action<string>? ConsoleOutputReceived;
 
         protected override void OnStartup(StartupEventArgs e)
         {
             base.OnStartup(e);
+            Settings = AppSettings.Load();
             Console.SetOut(new ConsoleRedirector());
             Console.WriteLine("OmniMouse started. Waiting for input...");
+        }
+
+        protected override void OnExit(ExitEventArgs e)
+        {
+            try
+            {
+                Settings?.Save();
+            }
+            catch
+            {
+                // ignore errors on exit
+            }
+            base.OnExit(e);
         }
 
         private class ConsoleRedirector : TextWriter

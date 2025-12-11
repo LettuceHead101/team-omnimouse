@@ -6,6 +6,32 @@ namespace OmniMouse.Hooks
 {
     public partial class InputHooks
     {
+        // Pre-flight verification constants
+        private const int EdgeClaimDebounceMs = 150;
+        private const int PreFlightTimeoutMs = 250;
+        private static DateTime _lastEdgeClaimAttempt = DateTime.MinValue;
+        private static volatile bool _preFlightAckReceived = false;
+        private static readonly object _preFlightLock = new object();
+
+        // Message type for pre-flight verification
+        private const byte MSG_PREFLIGHT_REQUEST = 0x20;
+        private const byte MSG_PREFLIGHT_ACK = 0x21;
+        // Add new message type for edge return negotiation
+        private const byte MSG_RECEIVER_EDGE_HIT = 0x22;  // NEW
+
+        // Add callback flag
+        private static volatile bool _receiverReportedEdgeHit = false;
+
+        /// <summary>
+        /// Test seam for SendPreFlightRequest. Tests can replace this to bypass network calls.
+        /// </summary>
+        internal static Func<UdpMouseTransmitter, bool>? SendPreFlightRequestImpl = null;
+
+        /// <summary>
+        /// Test seam for WaitForPreFlightAck. Tests can replace this to return immediately.
+        /// </summary>
+        internal static Func<int, bool>? WaitForPreFlightAckImpl = null;
+
         private static IntPtr MouseHookCallback(int nCode, IntPtr wParam, IntPtr lParam)
         {
             // First-hit log to confirm callback is actually firing
@@ -203,7 +229,7 @@ namespace OmniMouse.Hooks
 
 
                                     // Refresh actual cursor position (it should be unchanged, but reconcile drift).
-                                    if (GetCursorPos(out var cur))
+                                    if (GetCursorPosImpl(out var cur))
                                     {
                                         _instance._lastActualCursorX = cur.x;
                                         _instance._lastActualCursorY = cur.y;
@@ -350,108 +376,91 @@ namespace OmniMouse.Hooks
         // ---------------------------------------------------------
         // NEW: Dedicated Method for Returning to Local Control
         // ---------------------------------------------------------
-        private static void TryEdgeReturn(int x, int y)
+        private static void TryEdgeReturn(int senderX, int senderY)
         {
-            Console.WriteLine($"[TryEdgeReturn] START - Cursor at ({x},{y})");
-
-            // Only check for return when actively streaming to remote
+            // Guard: Must be actively streaming with a known direction
             if (!_remoteStreaming || !_remoteStreamingDirection.HasValue)
             {
-                Console.WriteLine($"[TryEdgeReturn] RETURN - Not streaming (remoteStreaming={_remoteStreaming}, direction={_remoteStreamingDirection?.ToString() ?? "null"})");
                 return;
             }
 
-            // Get REMOTE Bounds (where the remote cursor is)
-            if (_instance?._inputCoordinator == null)
+            // Guard: Receiver must have reported edge hit
+            if (!_receiverReportedEdgeHit)
             {
-                Console.WriteLine("[TryEdgeReturn] RETURN - InputCoordinator is null");
-                return;
-            }
-            if (string.IsNullOrEmpty(RemotePeerClientId))
-            {
-                Console.WriteLine("[TryEdgeReturn] RETURN - RemotePeerClientId is null or empty");
-                return;
-            }
-            
-            var monitors = _instance._inputCoordinator.ScreenMap?.GetMonitorsSnapshot();
-            if (monitors == null || monitors.Count == 0)
-            {
-                Console.WriteLine($"[TryEdgeReturn] RETURN - No monitors (monitors={(monitors == null ? "null" : "empty")})");
-                return;
-            }
-            Console.WriteLine($"[TryEdgeReturn] Found {monitors.Count} monitors");
-
-
-            int left = int.MaxValue, top = int.MaxValue;
-            int right = int.MinValue, bottom = int.MinValue;
-
-            // Find bounds of REMOTE machine (not local)
-            foreach (var monitor in monitors)
-            {
-                if (monitor.OwnerClientId == RemotePeerClientId)
-                {
-                    var gb = monitor.GlobalBounds;
-                    int gLeft = gb.X;
-                    int gTop = gb.Y;
-                    int gRight = gb.X + gb.Width;
-                    int gBottom = gb.Y + gb.Height;
-                    left = Math.Min(left, gLeft);
-                    top = Math.Min(top, gTop);
-                    right = Math.Max(right, gRight);
-                    bottom = Math.Max(bottom, gBottom);
-                    Console.WriteLine($"[TryEdgeReturn] Remote monitor (global) found - ({gLeft},{gTop}) to ({gRight},{gBottom})");
-                }
-            }
-
-            if (left == int.MaxValue)
-            {
-                Console.WriteLine($"[TryEdgeReturn] RETURN - No remote monitors found for RemotePeerClientId={RemotePeerClientId}");
-                Console.WriteLine($"[TryEdgeReturn] DEBUG - All monitor owners:");
-                foreach (var mon in monitors)
-                {
-                    Console.WriteLine($"  - Monitor: {mon.FriendlyName}, Owner: {mon.OwnerClientId}");
-                }
+                // Receiver hasn't confirmed yet - don't return
                 return;
             }
 
-            Console.WriteLine($"[TryEdgeReturn] Remote bounds: Left={left}, Top={top}, Right={right}, Bottom={bottom}");
+            // Get remote bounds to check if sender's remote cursor is at return edge
+            if (!TryGetRemoteBounds(out int rLeft, out int rTop, out int rRight, out int rBottom))
+            {
+                //Console.WriteLine("[HOOK][EdgeReturn] Cannot get remote bounds - aborting edge return");
+                return;
+            }
 
-            // Check if remote cursor hit the OPPOSITE edge from where we exited.
-            bool shouldReturn = false;
+            // IMPORTANT: rRight and rBottom from TryGetRemoteBounds are EXCLUSIVE bounds
+            // (calculated as gb.X + gb.Width and gb.Y + gb.Height)
+            // The actual rightmost pixel is at (rRight - 1), bottommost at (rBottom - 1)
+            int rRightInclusive = rRight - 1;
+            int rBottomInclusive = rBottom - 1;
+
+            // Determine if Sender's remote cursor is at the RETURN EDGE (opposite of entry direction)
+            bool senderAtReturnEdge = false;
+            string returnEdgeDesc = "";
 
             switch (_remoteStreamingDirection.Value)
             {
                 case OmniMouse.Switching.Direction.Right:
-                    // Exited via right edge; return by hitting LEFT edge OF REMOTE SCREEN
-                    shouldReturn = (x - left) <= EdgeThresholdPixels;
-                    Console.WriteLine($"[TryEdgeReturn] Direction=Right, checking left edge: x-left={x - left}, threshold={EdgeThresholdPixels}, shouldReturn={shouldReturn}");
+                    // Entered via right edge; return by hitting LEFT edge
+                    // Left edge check: distance from leftmost pixel (rLeft is inclusive)
+                    senderAtReturnEdge = (senderX - rLeft) <= EdgeThresholdPixels;
+                    returnEdgeDesc = "LEFT";
                     break;
+
                 case OmniMouse.Switching.Direction.Left:
-                    // Exited via left edge; return by hitting RIGHT edge OF REMOTE SCREEN
-                    shouldReturn = (right - x) <= EdgeThresholdPixels;
-                    Console.WriteLine($"[TryEdgeReturn] Direction=Left, checking right edge: right-x={right - x}, threshold={EdgeThresholdPixels}, shouldReturn={shouldReturn}");
+                    // Entered via left edge; return by hitting RIGHT edge
+                    // Right edge check: distance from rightmost pixel (rRightInclusive)
+                    senderAtReturnEdge = (rRightInclusive - senderX) <= EdgeThresholdPixels;
+                    returnEdgeDesc = "RIGHT";
                     break;
-                case OmniMouse.Switching.Direction.Down:
-                    // Exited via bottom edge; return by hitting TOP edge OF REMOTE SCREEN
-                    shouldReturn = (y - top) <= EdgeThresholdPixels;
-                    Console.WriteLine($"[TryEdgeReturn] Direction=Down, checking top edge: y-top={y - top}, threshold={EdgeThresholdPixels}, shouldReturn={shouldReturn}");
-                    break;
+
                 case OmniMouse.Switching.Direction.Up:
-                    // Exited via top edge; return by hitting BOTTOM edge OF REMOTE SCREEN
-                    shouldReturn = (bottom - y) <= EdgeThresholdPixels;
-                    Console.WriteLine($"[TryEdgeReturn] Direction=Up, checking bottom edge: bottom-y={bottom - y}, threshold={EdgeThresholdPixels}, shouldReturn={shouldReturn}");
+                    // Entered via top edge; return by hitting BOTTOM edge
+                    // Bottom edge check: distance from bottommost pixel (rBottomInclusive)
+                    senderAtReturnEdge = (rBottomInclusive - senderY) <= EdgeThresholdPixels;
+                    returnEdgeDesc = "BOTTOM";
+                    break;
+
+                case OmniMouse.Switching.Direction.Down:
+                    // Entered via bottom edge; return by hitting TOP edge
+                    // Top edge check: distance from topmost pixel (rTop is inclusive)
+                    senderAtReturnEdge = (senderY - rTop) <= EdgeThresholdPixels;
+                    returnEdgeDesc = "TOP";
                     break;
             }
 
-            if (shouldReturn)
+            if (!senderAtReturnEdge)
             {
-                Console.WriteLine($"[HOOK][EdgeReturn] Remote cursor at ({x},{y}) hit opposite edge (exited {_remoteStreamingDirection.Value}). Returning to local.");
-                EndRemoteStreaming();
+                // Sender's remote cursor not yet at return edge
+                //Console.WriteLine($"[HOOK][EdgeReturn] Receiver at edge, but Sender remote cursor at ({senderX},{senderY}) not at {returnEdgeDesc} edge yet. Bounds=({rLeft},{rTop})-({rRightInclusive},{rBottomInclusive})");
+                return;
             }
-            else
+
+            // Check accumulator threshold (smooth out jitter)
+            if (_remoteStreamingReleaseAccum < RemoteReleaseThresholdPixels)
             {
-                Console.WriteLine($"[TryEdgeReturn] No return - cursor not at opposite edge yet");
+                //Console.WriteLine($"[HOOK][EdgeReturn] Both at edge, but accumulator only at {_remoteStreamingReleaseAccum}px (need {RemoteReleaseThresholdPixels}px)");
+                return;
             }
+
+            // SUCCESS: Both Sender and Receiver agree they're at the return edge
+            //Console.WriteLine($"[HOOK][EdgeReturn] MUTUAL AGREEMENT! Sender remote at ({senderX},{senderY}), Receiver also at return edge. Accumulator: {_remoteStreamingReleaseAccum}px. ENDING STREAM");
+            
+            // Reset flags
+            _receiverReportedEdgeHit = false;
+            _remoteStreamingReleaseAccum = 0;
+            
+            EndRemoteStreaming();
         }
 
         // Helper: get remote machine aggregated bounds
@@ -489,11 +498,40 @@ namespace OmniMouse.Hooks
             if (string.IsNullOrEmpty(RemotePeerClientId)) return;
             if (_instance?._inputCoordinator == null) return;
 
-            // 1. Snapshot Monitors
+            // 1. DEBOUNCE CHECK: Prevent rapid re-attempts
+            var now = DateTime.UtcNow;
+            if ((now - _lastEdgeClaimAttempt).TotalMilliseconds < EdgeClaimDebounceMs)
+            {
+                //Console.WriteLine($"[HOOK][EdgeClaim] Debounce active - only {(now - _lastEdgeClaimAttempt).TotalMilliseconds:F0}ms since last attempt");
+                return;
+            }
+            _lastEdgeClaimAttempt = now;
+
+            // 2. VERIFICATION REQUEST: Send preflight check to Sender (use test seam if available)
+            //Console.WriteLine($"[HOOK][EdgeClaim] Sending preflight verification to {RemotePeerClientId}");
+            var preflightSendFunc = SendPreFlightRequestImpl ?? SendPreFlightRequest;
+            if (!preflightSendFunc(tx))
+            {
+                //Console.WriteLine("[HOOK][EdgeClaim] Failed to send preflight request");
+                return;
+            }
+
+            // 3. WAIT FOR ACK: Block up to 250ms for response (use test seam if available)
+            var preflightWaitFunc = WaitForPreFlightAckImpl ?? WaitForPreFlightAck;
+            if (!preflightWaitFunc(PreFlightTimeoutMs))
+            {
+                //Console.WriteLine($"[HOOK][EdgeClaim] Preflight timeout after {PreFlightTimeoutMs}ms - aborting switch");
+                return;
+            }
+
+            //Console.WriteLine("[HOOK][EdgeClaim] Preflight ACK received - proceeding with edge claim");
+
+            // 4. PROCEED WITH EXISTING LOGIC
+            // Snapshot Monitors
             var monitors = _instance._inputCoordinator.ScreenMap?.GetMonitorsSnapshot();
             if (monitors == null || monitors.Count == 0) return;
 
-            // 2. Find Local Bounds (Global)
+            // Find Local Bounds (Global)
             int left = int.MaxValue, top = int.MaxValue, right = int.MinValue, bottom = int.MinValue;
             foreach (var monitor in monitors)
             {
@@ -508,11 +546,16 @@ namespace OmniMouse.Hooks
             }
             if (left == int.MaxValue) return;
 
-            // 3. Check Local Edges
-            bool nearRight = (right - x) <= EdgeThresholdPixels;
+            // Check Local Edges
+            // IMPORTANT: 'right' and 'bottom' are EXCLUSIVE bounds (gb.X + gb.Width, gb.Y + gb.Height)
+            // The actual rightmost pixel is at (right - 1), bottommost at (bottom - 1)
+            int rightInclusive = right - 1;
+            int bottomInclusive = bottom - 1;
+            
+            bool nearRight = (rightInclusive - x) <= EdgeThresholdPixels;
             bool nearLeft = (x - left) <= EdgeThresholdPixels;
             bool nearTop = (y - top) <= EdgeThresholdPixels;
-            bool nearBottom = (bottom - y) <= EdgeThresholdPixels;
+            bool nearBottom = (bottomInclusive - y) <= EdgeThresholdPixels;
 
             // --- HELPER: RESOLVE NEIGHBOR ---
             (bool hasLayout, string? neighborId) ResolveNeighbor(OmniMouse.Switching.Direction dir)
@@ -524,13 +567,9 @@ namespace OmniMouse.Hooks
                 var me = layout.Machines.FirstOrDefault(m => m.MachineId == localId);
                 if (me == null || !me.IsPositioned) return (true, null);
 
-                int neighborPos = dir switch
-                {
-                    OmniMouse.Switching.Direction.Right => me.Position + 1,
-                    OmniMouse.Switching.Direction.Left => me.Position - 1,
-                    _ => -999
-                };
-                return (true, layout.Machines.FirstOrDefault(m => m.IsPositioned && m.Position == neighborPos)?.MachineId);
+                // Use grid-based neighbor lookup for 4-directional support
+                var neighbor = layout.GetNeighbor(me, dir);
+                return (true, neighbor?.MachineId);
             }
 
             // --- HELPER: GET TARGET BOUNDS ---
@@ -555,7 +594,6 @@ namespace OmniMouse.Hooks
             void ExecuteClaim(OmniMouse.Switching.Direction dir, int globalEntryX, int globalEntryY, int remoteGlobalLeft, int remoteGlobalTop, int remoteWidth, int remoteHeight)
             {
                 // 1. SAFETY NUDGE (Global Pixels)
-                // Move 10px inside so we don't trigger an immediate "Return" logic
                 int nudge = 10;
                 int finalGlobalX = globalEntryX;
                 int finalGlobalY = globalEntryY;
@@ -569,38 +607,33 @@ namespace OmniMouse.Hooks
                 }
 
                 // 2. SYNC LOCAL TRACKER (Global Pixels)
-                // Tell our local logic where the mouse REALLY is in the virtual map.
                 _remoteCursorX = finalGlobalX;
                 _remoteCursorY = finalGlobalY;
 
                 // 3. NORMALIZE FOR NETWORK (Universal 0-65535)
-                // Relative X (0..Width)
                 double relX = finalGlobalX - remoteGlobalLeft;
                 double relY = finalGlobalY - remoteGlobalTop;
 
-                // Scale to Universal (0..65535)
-                // We use double math to avoid integer truncation issues
                 const int UniversalMax = 65535;
                 int universalX = (int)((relX * UniversalMax) / remoteWidth);
                 int universalY = (int)((relY * UniversalMax) / remoteHeight);
 
-                // Clamp to be safe
                 if (universalX < 0) universalX = 0;
                 if (universalX > UniversalMax) universalX = UniversalMax;
                 if (universalY < 0) universalY = 0;
                 if (universalY > UniversalMax) universalY = UniversalMax;
 
-                Console.WriteLine($"[HOOK][EdgeClaim] HIT {dir}. Global:({finalGlobalX},{finalGlobalY}). Relative:({relX},{relY}). SENDING UNIVERSAL:({universalX},{universalY})");
+                //Console.WriteLine($"[HOOK][EdgeClaim] HIT {dir}. Global:({finalGlobalX},{finalGlobalY}). Relative:({relX},{relY}). SENDING UNIVERSAL:({universalX},{universalY})");
 
                 BeginRemoteStreaming(dir);
                 try
                 {
-                    // Send the UNIVERSAL coordinates
-                    tx.SendTakeControl(RemotePeerClientId, universalX, universalY);
+                    // Pass the entry direction so Receiver knows which edge to check for returning
+                    tx.SendTakeControl(RemotePeerClientId, universalX, universalY, entryDirection: dir);
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"[HOOK][EdgeClaim] SendTakeControl failed: {ex.Message}");
+                    //Console.WriteLine($"[HOOK][EdgeClaim] SendTakeControl failed: {ex.Message}");
                     EndRemoteStreaming();
                 }
             }
@@ -614,7 +647,6 @@ namespace OmniMouse.Hooks
                 SetRemotePeer(targetId);
 
                 var b = GetTargetBounds(targetId);
-                // Entry: Target's Left Edge
                 ExecuteClaim(OmniMouse.Switching.Direction.Right,
                     b.tLeft, Math.Max(b.tTop, Math.Min(b.tBottom - 1, y)),
                     b.tLeft, b.tTop, b.tRight - b.tLeft, b.tBottom - b.tTop);
@@ -627,7 +659,6 @@ namespace OmniMouse.Hooks
                 SetRemotePeer(targetId);
 
                 var b = GetTargetBounds(targetId);
-                // Entry: Target's Right Edge
                 ExecuteClaim(OmniMouse.Switching.Direction.Left,
                     b.tRight - 1, Math.Max(b.tTop, Math.Min(b.tBottom - 1, y)),
                     b.tLeft, b.tTop, b.tRight - b.tLeft, b.tBottom - b.tTop);
@@ -640,7 +671,6 @@ namespace OmniMouse.Hooks
                 SetRemotePeer(targetId);
 
                 var b = GetTargetBounds(targetId);
-                // Entry: Target's Bottom Edge
                 ExecuteClaim(OmniMouse.Switching.Direction.Up,
                     Math.Max(b.tLeft, Math.Min(b.tRight - 1, x)), b.tBottom - 1,
                     b.tLeft, b.tTop, b.tRight - b.tLeft, b.tBottom - b.tTop);
@@ -653,13 +683,94 @@ namespace OmniMouse.Hooks
                 SetRemotePeer(targetId);
 
                 var b = GetTargetBounds(targetId);
-                // Entry: Target's Top Edge
                 ExecuteClaim(OmniMouse.Switching.Direction.Down,
                     Math.Max(b.tLeft, Math.Min(b.tRight - 1, x)), b.tTop,
                     b.tLeft, b.tTop, b.tRight - b.tLeft, b.tBottom - b.tTop);
             }
         }
 
+        // --- PRE-FLIGHT HELPERS ---
+        private static bool SendPreFlightRequest(UdpMouseTransmitter tx)
+        {
+            try
+            {
+                var buf = new byte[1];
+                buf[0] = MSG_PREFLIGHT_REQUEST;
+                tx.SendDirect(buf, buf.Length);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                //Console.WriteLine($"[HOOK][PreFlight] Send failed: {ex.Message}");
+                return false;
+            }
+        }
 
+        private static bool WaitForPreFlightAck(int timeoutMs)
+        {
+            lock (_preFlightLock)
+            {
+                _preFlightAckReceived = false;
+            }
+
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            while (sw.ElapsedMilliseconds < timeoutMs)
+            {
+                lock (_preFlightLock)
+                {
+                    if (_preFlightAckReceived)
+                    {
+                        _preFlightAckReceived = false;
+                        return true;
+                    }
+                }
+                System.Threading.Thread.Sleep(5);
+            }
+
+            return false;
+        }
+
+        internal static void OnPreFlightAckReceived()
+        {
+            lock (_preFlightLock)
+            {
+                _preFlightAckReceived = true;
+            }
+        }
+
+        // Add public method for Transmitter to call
+        internal static void NotifyReceiverEdgeHit()
+        {
+            _receiverReportedEdgeHit = true;
+            //Console.WriteLine("[HOOK] Receiver edge hit notification received");
+        }
+
+        // Helper: Get Receiver's LOCAL screen bounds (what Receiver sees locally)
+        private static (int Left, int Top, int Right, int Bottom)? GetReceiverLocalBounds()
+        {
+            // This is the Receiver's own local screen bounds
+            // NOT the global coordinates where Receiver's monitors are mapped
+            // Just the local 0,0 based bounds
+            var topology = new OmniMouse.Switching.Win32ScreenTopology();
+            var bounds = topology.GetScreenConfiguration();
+            return (bounds.DesktopBounds.Left, bounds.DesktopBounds.Top, 
+                    bounds.DesktopBounds.Right, bounds.DesktopBounds.Bottom);
+        }
+
+        // Helper: Send edge hit notification to Sender
+        private static void NotifySenderOfEdgeHit(UdpMouseTransmitter tx)
+        {
+            try
+            {
+                var buf = new byte[1];
+                buf[0] = MSG_RECEIVER_EDGE_HIT;  // 0x22
+                tx.SendDirect(buf, buf.Length);
+                //Console.WriteLine("[HOOK] Sent edge hit notification to Sender");
+            }
+            catch (Exception ex)
+            {
+                //Console.WriteLine($"[HOOK] Failed to notify Sender of edge hit: {ex.Message}");
+            }
+        }
     }
 }

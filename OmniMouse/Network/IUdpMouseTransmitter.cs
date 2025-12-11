@@ -5,6 +5,10 @@ namespace OmniMouse.Network
     // IUdpMouseTransmitter: contract for sending/receiving mouse positions over UDP.
     public interface IUdpMouseTransmitter
     {
+        // Events
+        event Action<ConnectionRole>? RoleChanged;
+        event Action<int, int>? TakeControlReceived;
+        event Action<FileShare.FileOfferPacket>? FileOfferReceived;
         // Start listening on the well-known port.
         void StartHost();
 
@@ -41,8 +45,17 @@ namespace OmniMouse.Network
         // Request the target client to take control at the specified local coordinates.
         void SendTakeControl(string targetClientId, int localX, int localY);
 
+        // Request the target client to take control, including entry direction for return edge detection.
+        void SendTakeControl(string targetClientId, int localX, int localY, OmniMouse.Switching.Direction? entryDirection);
+
         // Send layout position update to peers.
         void SendLayoutUpdate(int position, string machineId, string displayName);
+
+        // Send grid layout position update to peers.
+        void SendGridLayoutUpdate(string machineId, string displayName, int gridX, int gridY);
+
+        // Send a file offer notification to the remote peer.
+        void SendFileOffer(FileShare.FileOfferPacket offer);
 
         // Get the layout coordinator instance
         LayoutCoordinator? GetLayoutCoordinator();

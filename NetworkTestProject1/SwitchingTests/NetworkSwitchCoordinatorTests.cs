@@ -37,6 +37,10 @@ namespace NetworkTestProject1.SwitchingTests
         private class FakeTransmitter : IUdpMouseTransmitter
         {
             public (string target, int x, int y)? LastTakeControl;
+            // New IUdpMouseTransmitter events required by production code
+            public event Action<ConnectionRole>? RoleChanged;
+            public event Action<int, int>? TakeControlReceived;
+            public event Action<OmniMouse.Network.FileShare.FileOfferPacket>? FileOfferReceived;
             public void StartHost() { }
             public void StartHost(string peerIp) { }
             public void StartCoHost(string hostIp) { }
@@ -52,7 +56,14 @@ namespace NetworkTestProject1.SwitchingTests
                 LastTakeControl = (targetClientId, x, y);
             }
 
+            public void SendTakeControl(string targetClientId, int x, int y, OmniMouse.Switching.Direction? entryDirection)
+            {
+                LastTakeControl = (targetClientId, x, y);
+            }
+
             public void SendLayoutUpdate(int position, string machineId, string displayName) { }
+            public void SendGridLayoutUpdate(string machineId, string displayName, int gridX, int gridY) { }
+            public void SendFileOffer(OmniMouse.Network.FileShare.FileOfferPacket offer) { }
             public OmniMouse.Network.LayoutCoordinator GetLayoutCoordinator() => null!;
             public string GetLocalMachineId() => "test-client";
         }

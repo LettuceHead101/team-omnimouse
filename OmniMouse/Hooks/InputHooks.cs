@@ -86,7 +86,7 @@ namespace OmniMouse.Hooks
             
             // Initialize remote cursor position in REMOTE coordinate space (not local!)
             // We need to map the entry point based on which edge we crossed
-            if (GetCursorPos(out var cur) && !string.IsNullOrEmpty(RemotePeerClientId))
+            if (GetCursorPosImpl(out var cur) && !string.IsNullOrEmpty(RemotePeerClientId))
             {
                 // Get remote machine's monitor bounds
                 var monitors = _instance?._inputCoordinator?.ScreenMap?.GetMonitorsSnapshot();
@@ -193,6 +193,44 @@ namespace OmniMouse.Hooks
             }
         }
 
+        /// <summary>
+        /// Fully resets all peer connection state. Called when peer disconnects.
+        /// This ensures no stale state causes issues after reconnection.
+        /// </summary>
+        public static void ResetPeerConnectionState()
+        {
+            Console.WriteLine("[HOOK] Resetting all peer connection state");
+            
+            // End any active streaming
+            _remoteStreaming = false;
+            _remoteStreamingDirection = null;
+            _remoteStreamingReleaseAccum = 0;
+            _remoteCursorX = 0;
+            _remoteCursorY = 0;
+            
+            // Reset edge detection state
+            _receiverReportedEdgeHit = false;
+            
+            // Clear remote peer ID so edge detection won't try to use stale data
+            RemotePeerClientId = null;
+            
+            // Reset preflight state
+            lock (_preFlightLock)
+            {
+                _preFlightAckReceived = false;
+            }
+            
+            // Reset suppression state
+            lock (_suppressionLock)
+            {
+                _suppressX = int.MinValue;
+                _suppressY = int.MinValue;
+                _suppressCount = 0;
+            }
+            
+            Console.WriteLine("[HOOK] Peer connection state fully reset");
+        }
+
         public static void SuppressNextMoveFrom(int x, int y)
         {
             lock (_suppressionLock)
@@ -227,7 +265,7 @@ namespace OmniMouse.Hooks
             // initialize last seen position to current cursor position
             lock (_sendGate)
             {
-                if (GetCursorPos(out var p))
+                if (GetCursorPosImpl(out var p))
                 {
                     _lastMouseX = p.x;
                     _lastMouseY = p.y;

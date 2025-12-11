@@ -63,39 +63,39 @@ namespace OmniMouse.Switching
                     catch { /* Ignore logging here for speed */ }
                 });
 
-                // 2. Calculate TARGET Coordinates (The Fix)
-                // We cannot send 'e.UniversalCursorPoint.X' blindly because it reflects the SENDER's position.
-                // We must project where we want to land on the TARGET.
-
+                // 2. Calculate target entry coordinates
+                // The UniversalCursorPoint preserves the correct position along the non-crossing axis,
+                // but we need to adjust the crossing axis to enter at the opposite edge
                 int sendTargetX = e.UniversalCursorPoint.X;
                 int sendTargetY = e.UniversalCursorPoint.Y;
 
-                // Note: We use int.MaxValue/MinValue to force the receiver's SetCursorPos 
-                // to clamp to the furthest monitor edge, solving the multi-monitor mapping issue.
+                const int UniversalMax = 65535;
+                const int EdgeOffset = 100; // Small offset from edge in universal coordinates
+
                 switch (e.Direction)
                 {
-                    case Direction.Left:
-                        // Moving Left implies entering the Target's RIGHT edge.
-                        // Send a huge number so the Receiver clamps it to its Rightmost Secondary Monitor.
-                        sendTargetX = int.MaxValue;
-                        break;
-
                     case Direction.Right:
-                        // Moving Right implies entering the Target's LEFT edge.
-                        sendTargetX = 0; // Or int.MinValue
+                        // Exiting RIGHT → Enter target's LEFT edge (preserve Y)
+                        sendTargetX = EdgeOffset;
                         break;
 
-                    // For Up/Down, we usually want to preserve X and clamp Y, 
-                    // but we'll leave that default for now.
-                    case Direction.Up:
-                        sendTargetY = int.MaxValue; // Enter bottom
+                    case Direction.Left:
+                        // Exiting LEFT → Enter target's RIGHT edge (preserve Y)
+                        sendTargetX = UniversalMax - EdgeOffset;
                         break;
+
                     case Direction.Down:
-                        sendTargetY = 0; // Enter top
+                        // Exiting BOTTOM → Enter target's TOP edge (preserve X)
+                        sendTargetY = EdgeOffset;
+                        break;
+                        
+                    case Direction.Up:
+                        // Exiting TOP → Enter target's BOTTOM edge (preserve X)
+                        sendTargetY = UniversalMax - EdgeOffset;
                         break;
                 }
 
-                // 3. Send the modified Target Coordinates
+                // 3. Send the corrected target coordinates
                 this.transmitter.SendTakeControl(e.ToMachine, sendTargetX, sendTargetY);
 
                 this.switcher.SetActiveMachine(e.ToMachine);

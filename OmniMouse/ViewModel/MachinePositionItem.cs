@@ -10,6 +10,8 @@ namespace OmniMouse.ViewModel
         private string _machineId = string.Empty;
         private string _displayName = string.Empty;
         private int _position = -1;
+        private int _gridX = -1;
+        private int _gridY = -1;
         private bool _isLocal;
         private bool _isPositioned;
         private bool _isEmptySlot;
@@ -32,6 +34,30 @@ namespace OmniMouse.ViewModel
             set => SetProperty(ref _position, value);
         }
 
+        public int GridX
+        {
+            get => _gridX;
+            set
+            {
+                if (SetProperty(ref _gridX, value))
+                {
+                    OnPropertyChanged(nameof(GridPositionDisplay));
+                }
+            }
+        }
+
+        public int GridY
+        {
+            get => _gridY;
+            set
+            {
+                if (SetProperty(ref _gridY, value))
+                {
+                    OnPropertyChanged(nameof(GridPositionDisplay));
+                }
+            }
+        }
+
         public bool IsLocal
         {
             get => _isLocal;
@@ -51,6 +77,7 @@ namespace OmniMouse.ViewModel
         }
 
         public string PositionDisplay => IsPositioned ? $"Position {Position}" : "Unassigned";
+        public string GridPositionDisplay => (GridX >= 0 && GridY >= 0) ? $"[{GridX}, {GridY}]" : "Unassigned";
         public string TypeDisplay => IsLocal ? "YOU" : "PEER";
     }
 }

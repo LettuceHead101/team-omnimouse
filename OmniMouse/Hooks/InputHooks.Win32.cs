@@ -28,7 +28,7 @@ namespace OmniMouse.Hooks
 
         // Win32 structs
         [StructLayout(LayoutKind.Sequential)]
-        private struct POINT { public int x; public int y; }
+        internal struct POINT { public int x; public int y; }
 
         [StructLayout(LayoutKind.Sequential)]
         private struct MSLLHOOKSTRUCT
@@ -86,6 +86,18 @@ namespace OmniMouse.Hooks
 
         [DllImport("user32.dll")]
         private static extern bool GetCursorPos(out POINT lpPoint);
+
+        /// <summary>
+        /// Delegate signature for GetCursorPos replacement in tests.
+        /// </summary>
+        internal delegate bool GetCursorPosDelegate(out POINT lpPoint);
+
+        /// <summary>
+        /// Test seam: expose a delegate indirection so unit tests can override the native
+        /// GetCursorPos behavior. Production uses the real P/Invoke; tests can replace this
+        /// field via reflection to return deterministic cursor positions.
+        /// </summary>
+        internal static GetCursorPosDelegate GetCursorPosImpl = GetCursorPos;
 
         [DllImport("user32.dll")]
         private static extern int GetMessage(out MSG lpMsg, IntPtr hWnd, uint wMsgFilterMin, uint wMsgFilterMax);

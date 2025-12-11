@@ -39,6 +39,20 @@
         // Reflection for CallNextHookExImpl seam
         private readonly FieldInfo _callNextHookExImplField = typeof(TargetHooks).GetField("CallNextHookExImpl", BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public)!;
 
+        // Reflection for GetCursorPosImpl seam - allows tests to control cursor position
+        private readonly FieldInfo _getCursorPosImplField = typeof(TargetHooks).GetField("GetCursorPosImpl", BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public)!;
+
+        // Reflection for preflight seams - allows tests to bypass network operations
+        private readonly FieldInfo _sendPreFlightRequestImplField = typeof(TargetHooks).GetField("SendPreFlightRequestImpl", BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public)!;
+        private readonly FieldInfo _waitForPreFlightAckImplField = typeof(TargetHooks).GetField("WaitForPreFlightAckImpl", BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public)!;
+
+        // Store the original GetCursorPosImpl delegate to restore after tests
+        private static Delegate? _originalGetCursorPosImpl;
+
+        // Test cursor position - used by test delegate
+        private static int _testCursorX = 0;
+        private static int _testCursorY = 0;
+
         // The System Under Test (SUT)
         private TargetHooks? _sut;
 
@@ -83,6 +97,48 @@
             Marshal.FreeHGlobal(lParam);
 
             return result;
+        }
+
+        /// <summary>
+        /// Sets up a test delegate for GetCursorPosImpl that returns controlled cursor positions.
+        /// The delegate will return the value of _testCursorX and _testCursorY.
+        /// Call SetTestCursorPosition to update the position before each InvokeCallback.
+        /// </summary>
+        private void SetupTestGetCursorPos()
+        {
+            // Save original delegate if not already saved
+            if (_originalGetCursorPosImpl == null)
+            {
+                _originalGetCursorPosImpl = (Delegate)_getCursorPosImplField.GetValue(null)!;
+            }
+
+            // Create a delegate that matches the GetCursorPosDelegate signature
+            // The delegate type is: delegate bool GetCursorPosDelegate(out POINT lpPoint)
+            // We need to use reflection to create the delegate with the correct type
+            var delegateType = typeof(TargetHooks).GetNestedType("GetCursorPosDelegate", BindingFlags.NonPublic | BindingFlags.Public)!;
+            var pointType = typeof(TargetHooks).GetNestedType("POINT", BindingFlags.NonPublic | BindingFlags.Public)!;
+
+            // Create a method that returns our test cursor position
+            var testDelegate = Delegate.CreateDelegate(delegateType, typeof(MouseHooksTests).GetMethod(nameof(TestGetCursorPos), BindingFlags.Static | BindingFlags.NonPublic)!);
+            _getCursorPosImplField.SetValue(null, testDelegate);
+        }
+
+        /// <summary>
+        /// Test implementation of GetCursorPos that returns controlled cursor positions.
+        /// </summary>
+        private static bool TestGetCursorPos(out TargetHooks.POINT lpPoint)
+        {
+            lpPoint = new TargetHooks.POINT { x = _testCursorX, y = _testCursorY };
+            return true;
+        }
+
+        /// <summary>
+        /// Sets the test cursor position that will be returned by GetCursorPosImpl.
+        /// </summary>
+        private static void SetTestCursorPosition(int x, int y)
+        {
+            _testCursorX = x;
+            _testCursorY = y;
         }
 
     
@@ -144,10 +200,46 @@
             // Reset CallNextHookExImpl to the stable test delegate to avoid races
             _callNextHookExImplField.SetValue(null, TestCallNext);
 
-            // Reset static flags to avoid cross-test state leakage
+            // Reset GetCursorPosImpl to original if it was saved
+            if (_originalGetCursorPosImpl != null)
+            {
+                _getCursorPosImplField.SetValue(null, _originalGetCursorPosImpl);
+            }
+
+            // Reset preflight seams to null (production behavior)
+            _sendPreFlightRequestImplField?.SetValue(null, null);
+            _waitForPreFlightAckImplField?.SetValue(null, null);
+
+            // Comprehensively reset ALL static flags to avoid cross-test state leakage
             _isSyntheticInput.SetValue(null, false);
             _remoteStreamingField.SetValue(null, false);
+            _remoteStreamingDirectionField.SetValue(null, null);
+            _remoteStreamingReleaseAccumField.SetValue(null, 0);
+            _remoteCursorXField.SetValue(null, 0);
+            _remoteCursorYField.SetValue(null, 0);
+            _suppressXField.SetValue(null, int.MinValue);
+            _suppressCountField.SetValue(null, 0);
+            var suppressYField = typeof(TargetHooks).GetField("_suppressY", BindingFlags.Static | BindingFlags.NonPublic);
+            suppressYField?.SetValue(null, int.MinValue);
+            
+            // Clear remote peer
+            TargetHooks.SetRemotePeer(null!);
+            
+            // Reset preflight state
+            var preFlightAckField = typeof(TargetHooks).GetField("_preFlightAckReceived", BindingFlags.Static | BindingFlags.NonPublic);
+            preFlightAckField?.SetValue(null, false);
+            var receiverEdgeHitField = typeof(TargetHooks).GetField("_receiverReportedEdgeHit", BindingFlags.Static | BindingFlags.NonPublic);
+            receiverEdgeHitField?.SetValue(null, false);
+            
+            // Reset debounce timer
+            var lastEdgeClaimField = typeof(TargetHooks).GetField("_lastEdgeClaimAttempt", BindingFlags.Static | BindingFlags.NonPublic);
+            lastEdgeClaimField?.SetValue(null, DateTime.MinValue);
+            
             _instanceField.SetValue(null, null);
+            
+            // Disconnect and cleanup real UDP transmitter
+            _realConcreteUdp?.Disconnect();
+            _sut?.UninstallHooks();
         }
 
 
@@ -652,6 +744,9 @@
         [TestMethod]
         public void RemoteStreaming_ReleaseAccum_IncrementsAndResets()
         {
+            // Setup test seam for GetCursorPos to return controlled values
+            SetupTestGetCursorPos();
+
             // Arrange: provide remote peer + monitor so non-fallback path runs
             string remoteId = "RelAccumPeer";
             TargetHooks.SetRemotePeer(remoteId);
@@ -674,10 +769,17 @@
             typeof(TargetHooks).GetField("_lastActualCursorX", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(_sut, 1000);
             typeof(TargetHooks).GetField("_lastActualCursorY", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(_sut, 1000);
 
+            // Set test cursor position for return movement
+            SetTestCursorPosition(1008, 1000);
+
             // Act 1: return-direction movement (dx>0) increments
             InvokeCallback(0, 1008, 1000, (IntPtr)WM_MOUSEMOVE, 0, 0); // dx=+8
             int afterReturn = (int)_remoteStreamingReleaseAccumField.GetValue(null)!;
             Assert.IsTrue(afterReturn >= 8, $"Accum should increase on return movement; got {afterReturn}");
+
+            // Update baseline and cursor position for opposite movement
+            typeof(TargetHooks).GetField("_lastActualCursorX", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(_sut, 1008);
+            SetTestCursorPosition(995, 1000);
 
             // Act 2: opposite-direction movement (dx<0) should reset
             InvokeCallback(0, 995, 1000, (IntPtr)WM_MOUSEMOVE, 0, 0); // dx=-13
@@ -690,6 +792,21 @@
         [TestMethod]
         public void RemoteStreaming_ReleaseAccum_RightDirection()
         {
+            // Setup test seam for GetCursorPos to return controlled values
+            SetupTestGetCursorPos();
+
+            // Setup remote peer and monitor to use non-fallback path
+            string remoteId = "RelAccumRightPeer";
+            TargetHooks.SetRemotePeer(remoteId);
+            _realScreenMap!.AddOrUpdateClient(new ClientPc { ClientId = remoteId, FriendlyName = "RemoteRight" });
+            _realScreenMap.AddOrUpdateMonitor(new MonitorInfo
+            {
+                OwnerClientId = remoteId,
+                FriendlyName = "RightMon",
+                GlobalBounds = new RectInt(2000, 2000, 400, 300),
+                LocalBounds = new RectInt(0, 0, 400, 300)
+            });
+
             _udpTransmitterField.SetValue(_sut, _realConcreteUdp);
             _realConcreteUdp!.SetLocalRole(ConnectionRole.Sender);
             _remoteStreamingField.SetValue(null, true);
@@ -697,19 +814,32 @@
             _remoteStreamingReleaseAccumField.SetValue(null, 0);
             typeof(TargetHooks).GetField("_lastActualCursorX", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(_sut, 1000);
             typeof(TargetHooks).GetField("_lastActualCursorY", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(_sut, 1000);
+            
+            // Set test cursor position (GetCursorPos will return this)
+            SetTestCursorPosition(990, 1000);
+            
             // For Right exit, return is LEFT (dx<0) increments
             InvokeCallback(0, 990, 1000, (IntPtr)WM_MOUSEMOVE, 0, 0);
             int inc = (int)_remoteStreamingReleaseAccumField.GetValue(null)!;
-            // Non-return direction resets
+            
+            // Update cursor position for next call and reset baseline
+            SetTestCursorPosition(1010, 1000);
+            typeof(TargetHooks).GetField("_lastActualCursorX", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(_sut, 990);
+            
+            // Non-return direction (dx>0) resets
             InvokeCallback(0, 1010, 1000, (IntPtr)WM_MOUSEMOVE, 0, 0);
             int reset = (int)_remoteStreamingReleaseAccumField.GetValue(null)!;
-            Assert.IsTrue(inc > 0);
-            Assert.AreEqual(0, reset);
+            
+            Assert.IsTrue(inc > 0, $"Accum should increase on return movement; got {inc}");
+            Assert.AreEqual(0, reset, $"Accum should reset on opposite movement; got {reset}");
         }
 
         [TestMethod]
         public void RemoteStreaming_ReleaseAccum_UpDirection()
         {
+            // Setup test seam for GetCursorPos to return controlled values
+            SetupTestGetCursorPos();
+
             // Arrange: remote peer + monitor
             string remoteId = "RelAccumUpPeer";
             TargetHooks.SetRemotePeer(remoteId);
@@ -731,10 +861,17 @@
             typeof(TargetHooks).GetField("_lastActualCursorX", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(_sut, 1200);
             typeof(TargetHooks).GetField("_lastActualCursorY", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(_sut, 1200);
 
+            // Set test cursor position
+            SetTestCursorPosition(1200, 1206);
+
             // Act 1: return-direction (dy>0) increments
             InvokeCallback(0, 1200, 1206, (IntPtr)WM_MOUSEMOVE, 0, 0); // dy=+6
             int afterDown = (int)_remoteStreamingReleaseAccumField.GetValue(null)!;
             Assert.IsTrue(afterDown >= 6, $"Accum should increase on return movement; got {afterDown}");
+
+            // Update cursor position for next call and reset baseline
+            SetTestCursorPosition(1200, 1194);
+            typeof(TargetHooks).GetField("_lastActualCursorY", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(_sut, 1206);
 
             // Act 2: opposite (dy<0) resets
             InvokeCallback(0, 1200, 1194, (IntPtr)WM_MOUSEMOVE, 0, 0); // dy=-12
@@ -746,6 +883,9 @@
         [TestMethod]
         public void RemoteStreaming_ReleaseAccum_DownDirection()
         {
+            // Setup test seam for GetCursorPos to return controlled values
+            SetupTestGetCursorPos();
+
             _udpTransmitterField.SetValue(_sut, _realConcreteUdp);
             _realConcreteUdp!.SetLocalRole(ConnectionRole.Sender);
             _remoteStreamingField.SetValue(null, true);
@@ -753,24 +893,38 @@
             _remoteStreamingReleaseAccumField.SetValue(null, 0);
             typeof(TargetHooks).GetField("_lastActualCursorX", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(_sut, 1000);
             typeof(TargetHooks).GetField("_lastActualCursorY", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(_sut, 1000);
+            
+            // Set test cursor position
+            SetTestCursorPosition(1000, 990);
+            
             // Down exit, return is UP (dy<0)
             InvokeCallback(0, 1000, 990, (IntPtr)WM_MOUSEMOVE, 0, 0);
             int inc = (int)_remoteStreamingReleaseAccumField.GetValue(null)!;
+            
+            // Update cursor position for next call and reset baseline
+            SetTestCursorPosition(1010, 1000);
+            typeof(TargetHooks).GetField("_lastActualCursorY", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(_sut, 990);
+            
             // Non-return resets
             InvokeCallback(0, 1010, 1000, (IntPtr)WM_MOUSEMOVE, 0, 0);
             int reset = (int)_remoteStreamingReleaseAccumField.GetValue(null)!;
-            Assert.IsTrue(inc > 0);
-            Assert.AreEqual(0, reset);
+            Assert.IsTrue(inc > 0, $"Accum should increase on return movement; got {inc}");
+            Assert.AreEqual(0, reset, $"Accum should reset on opposite movement; got {reset}");
         }
 
         [TestMethod]
         public void EdgeClaim_Left_Top_Bottom_BeginStreaming()
         {
+            // Setup test seams to bypass actual network operations
+            _sendPreFlightRequestImplField.SetValue(null, new Func<UdpMouseTransmitter, bool>(tx => true));
+            _waitForPreFlightAckImplField.SetValue(null, new Func<int, bool>(timeout => true));
+
             // Arrange receiver with seam and layout
             _udpTransmitterField.SetValue(_sut, _realConcreteUdp);
             _realConcreteUdp!.SetLocalRole(ConnectionRole.Receiver);
             var handshakeField = typeof(UdpMouseTransmitter).GetField("_handshakeComplete", BindingFlags.Instance | BindingFlags.NonPublic);
             if (handshakeField != null) handshakeField.SetValue(_realConcreteUdp, true);
+            
             _realConcreteUdp.SendTakeControlImpl = (clientId, ux, uy) => { };
             string remoteId = "Remote-Edges";
             TargetHooks.SetRemotePeer(remoteId);
@@ -779,24 +933,35 @@
             _realScreenMap.AddOrUpdateMonitor(new MonitorInfo { OwnerClientId = _realCoordinator.SelfClientId, FriendlyName = "Local", GlobalBounds = new RectInt(0,0,100,100), LocalBounds = new RectInt(0,0,100,100) });
             _realScreenMap.AddOrUpdateMonitor(new MonitorInfo { OwnerClientId = remoteId, FriendlyName = "Remote", GlobalBounds = new RectInt(100,0,100,100), LocalBounds = new RectInt(0,0,100,100) });
 
-            // Left edge
-            InvokeCallback(0, 1, 10, (IntPtr)WM_MOUSEMOVE, 0, 0);
-            Assert.IsTrue((bool)_remoteStreamingField.GetValue(null)!);
+            // Reset debounce timer before each edge test
+            var lastEdgeClaimField = typeof(TargetHooks).GetField("_lastEdgeClaimAttempt", BindingFlags.Static | BindingFlags.NonPublic);
+            lastEdgeClaimField?.SetValue(null, DateTime.MinValue);
 
+            // Left edge - test streaming begins
+            InvokeCallback(0, 1, 10, (IntPtr)WM_MOUSEMOVE, 0, 0);
+            bool streamingAfterLeft = (bool)_remoteStreamingField.GetValue(null)!;
+            
             // Reset streaming for next checks
             TargetHooks.EndRemoteStreaming();
             _realConcreteUdp.SetLocalRole(ConnectionRole.Receiver);
+            lastEdgeClaimField?.SetValue(null, DateTime.MinValue); // Reset debounce
 
             // Top edge
             InvokeCallback(0, 50, 1, (IntPtr)WM_MOUSEMOVE, 0, 0);
-            Assert.IsTrue((bool)_remoteStreamingField.GetValue(null)!);
+            bool streamingAfterTop = (bool)_remoteStreamingField.GetValue(null)!;
 
             TargetHooks.EndRemoteStreaming();
             _realConcreteUdp.SetLocalRole(ConnectionRole.Receiver);
+            lastEdgeClaimField?.SetValue(null, DateTime.MinValue); // Reset debounce
 
             // Bottom edge
             InvokeCallback(0, 50, 99, (IntPtr)WM_MOUSEMOVE, 0, 0);
-            Assert.IsTrue((bool)_remoteStreamingField.GetValue(null)!);
+            bool streamingAfterBottom = (bool)_remoteStreamingField.GetValue(null)!;
+            
+            // Assert at the end to see all failures at once
+            Assert.IsTrue(streamingAfterLeft, "Streaming should begin after left edge claim");
+            Assert.IsTrue(streamingAfterTop, "Streaming should begin after top edge claim");
+            Assert.IsTrue(streamingAfterBottom, "Streaming should begin after bottom edge claim");
         }
 
         //[TestMethod]
@@ -822,6 +987,10 @@
         [TestMethod]
         public void EdgeClaim_BeginsRemoteStreamingAndSetsDirection()
         {
+            // Setup test seams to bypass actual network operations
+            _sendPreFlightRequestImplField.SetValue(null, new Func<UdpMouseTransmitter, bool>(tx => true));
+            _waitForPreFlightAckImplField.SetValue(null, new Func<int, bool>(timeout => true));
+
             // Arrange: role receiver, handshake complete, near right edge
             _udpTransmitterField.SetValue(_sut, _realConcreteUdp);
             _realConcreteUdp!.SetLocalRole(ConnectionRole.Receiver);
@@ -832,6 +1001,10 @@
 
             // Install test seam to avoid real TCP and keep streaming state intact
             _realConcreteUdp.SendTakeControlImpl = (clientId, ux, uy) => { /* noop in tests */ };
+
+            // Reset debounce timer
+            var lastEdgeClaimField = typeof(TargetHooks).GetField("_lastEdgeClaimAttempt", BindingFlags.Static | BindingFlags.NonPublic);
+            lastEdgeClaimField?.SetValue(null, DateTime.MinValue);
 
             // Local + remote monitors
             string remoteId = "Remote-2";
@@ -890,11 +1063,13 @@
         [TestMethod]
         public void TryEdgeReturn_OppositeEdge_EndsStreaming()
         {
+            // Setup test seam for GetCursorPos to return controlled values
+            SetupTestGetCursorPos();
+
             // Arrange: streaming active, direction Right (exited via right edge). Return when hitting LEFT remote edge.
             _udpTransmitterField.SetValue(_sut, _realConcreteUdp);
             _realConcreteUdp!.SetLocalRole(ConnectionRole.Sender);
-            _remoteStreamingField.SetValue(null, true);
-            _remoteStreamingDirectionField.SetValue(null, OmniMouse.Switching.Direction.Right);
+            
             string remoteId = "Remote-3";
             TargetHooks.SetRemotePeer(remoteId);
             var screenMap = _realScreenMap!;
@@ -915,14 +1090,29 @@
                 LocalBounds = new RectInt(0, 0, 400, 600)
             });
 
+            // Set streaming state AFTER screen map is configured
+            _remoteStreamingField.SetValue(null, true);
+            _remoteStreamingDirectionField.SetValue(null, OmniMouse.Switching.Direction.Right);
+
+            // Set receiver reported edge hit flag (simulates multi-machine handshake)
+            var receiverEdgeHitField = typeof(TargetHooks).GetField("_receiverReportedEdgeHit", BindingFlags.Static | BindingFlags.NonPublic);
+            receiverEdgeHitField?.SetValue(null, true);
+
+            // Set accumulator above threshold (40 pixels)
+            _remoteStreamingReleaseAccumField.SetValue(null, 50);
+
             // Place remote cursor near left edge of remote bounds to trigger return (x-left <= threshold)
-            _remoteCursorXField.SetValue(null, 900); // left edge
+            _remoteCursorXField.SetValue(null, 901); // near left edge (900 + 1)
             _remoteCursorYField.SetValue(null, 100);
 
-            // Invoke movement with zero delta (still processes TryEdgeReturn). Need baseline for dx/dy calc.
-            typeof(TargetHooks).GetField("_lastActualCursorX", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(_sut, 900);
+            // Set test cursor position
+            SetTestCursorPosition(895, 100);
+
+            // Invoke movement with negative delta to move cursor to/past left edge
+            typeof(TargetHooks).GetField("_lastActualCursorX", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(_sut, 910);
             typeof(TargetHooks).GetField("_lastActualCursorY", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(_sut, 100);
-            InvokeCallback(0, 900, 100, (IntPtr)WM_MOUSEMOVE, 0, 0);
+            // Move left to hit the edge
+            InvokeCallback(0, 895, 100, (IntPtr)WM_MOUSEMOVE, 0, 0);
 
             // Assert: streaming ended
             Assert.IsFalse((bool)_remoteStreamingField.GetValue(null)!, "Streaming should end after hitting opposite remote edge for return.");
@@ -931,10 +1121,12 @@
         [TestMethod]
         public void TryEdgeReturn_FromLeftDirection_HitsRightEdge_EndsStreaming()
         {
+            // Setup test seam for GetCursorPos to return controlled values
+            SetupTestGetCursorPos();
+
             _udpTransmitterField.SetValue(_sut, _realConcreteUdp);
             _realConcreteUdp!.SetLocalRole(ConnectionRole.Sender);
-            _remoteStreamingField.SetValue(null, true);
-            _remoteStreamingDirectionField.SetValue(null, OmniMouse.Switching.Direction.Left);
+            
             string remoteId = "Remote-Left";
             TargetHooks.SetRemotePeer(remoteId);
             _realScreenMap!.AddOrUpdateClient(new ClientPc { ClientId = remoteId, FriendlyName = "Remote" });
@@ -945,22 +1137,41 @@
                 GlobalBounds = new RectInt(100, 200, 300, 150),
                 LocalBounds = new RectInt(0, 0, 300, 150)
             });
-            // Place remote cursor at right edge (should trigger return for Left exit)
-            _remoteCursorXField.SetValue(null, 399); // right-1
+            
+            // Set streaming state AFTER screen map is configured
+            _remoteStreamingField.SetValue(null, true);
+            _remoteStreamingDirectionField.SetValue(null, OmniMouse.Switching.Direction.Left);
+
+            // Set receiver reported edge hit flag (simulates multi-machine handshake)
+            var receiverEdgeHitField = typeof(TargetHooks).GetField("_receiverReportedEdgeHit", BindingFlags.Static | BindingFlags.NonPublic);
+            receiverEdgeHitField?.SetValue(null, true);
+
+            // Set accumulator above threshold (40 pixels)
+            _remoteStreamingReleaseAccumField.SetValue(null, 50);
+            
+            // Place remote cursor near right edge (should trigger return for Left exit)
+            _remoteCursorXField.SetValue(null, 398); // near right edge (right=400)
             _remoteCursorYField.SetValue(null, 250);
-            typeof(TargetHooks).GetField("_lastActualCursorX", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(_sut, 399);
+
+            // Set test cursor position
+            SetTestCursorPosition(405, 250);
+
+            typeof(TargetHooks).GetField("_lastActualCursorX", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(_sut, 390);
             typeof(TargetHooks).GetField("_lastActualCursorY", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(_sut, 250);
-            InvokeCallback(0, 399, 250, (IntPtr)WM_MOUSEMOVE, 0, 0);
-            Assert.IsFalse((bool)_remoteStreamingField.GetValue(null)!);
+            // Move right to hit the edge
+            InvokeCallback(0, 405, 250, (IntPtr)WM_MOUSEMOVE, 0, 0);
+            Assert.IsFalse((bool)_remoteStreamingField.GetValue(null)!, "Streaming should end after hitting right edge when exited from Left");
         }
 
         [TestMethod]
         public void TryEdgeReturn_FromUpDirection_HitsBottomEdge_EndsStreaming()
         {
+            // Setup test seam for GetCursorPos to return controlled values
+            SetupTestGetCursorPos();
+
             _udpTransmitterField.SetValue(_sut, _realConcreteUdp);
             _realConcreteUdp!.SetLocalRole(ConnectionRole.Sender);
-            _remoteStreamingField.SetValue(null, true);
-            _remoteStreamingDirectionField.SetValue(null, OmniMouse.Switching.Direction.Up);
+            
             string remoteId = "Remote-Up";
             TargetHooks.SetRemotePeer(remoteId);
             _realScreenMap!.AddOrUpdateClient(new ClientPc { ClientId = remoteId, FriendlyName = "Remote" });
@@ -971,22 +1182,41 @@
                 GlobalBounds = new RectInt(500, 500, 200, 200),
                 LocalBounds = new RectInt(0, 0, 200, 200)
             });
-            // Cursor at bottom edge
+            
+            // Set streaming state AFTER screen map is configured
+            _remoteStreamingField.SetValue(null, true);
+            _remoteStreamingDirectionField.SetValue(null, OmniMouse.Switching.Direction.Up);
+
+            // Set receiver reported edge hit flag (simulates multi-machine handshake)
+            var receiverEdgeHitField = typeof(TargetHooks).GetField("_receiverReportedEdgeHit", BindingFlags.Static | BindingFlags.NonPublic);
+            receiverEdgeHitField?.SetValue(null, true);
+
+            // Set accumulator above threshold (40 pixels)
+            _remoteStreamingReleaseAccumField.SetValue(null, 50);
+            
+            // Cursor near bottom edge
             _remoteCursorXField.SetValue(null, 550);
-            _remoteCursorYField.SetValue(null, 699); // bottom-1
+            _remoteCursorYField.SetValue(null, 698); // near bottom (bottom=700)
+
+            // Set test cursor position
+            SetTestCursorPosition(550, 705);
+
             typeof(TargetHooks).GetField("_lastActualCursorX", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(_sut, 550);
-            typeof(TargetHooks).GetField("_lastActualCursorY", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(_sut, 699);
-            InvokeCallback(0, 550, 699, (IntPtr)WM_MOUSEMOVE, 0, 0);
-            Assert.IsFalse((bool)_remoteStreamingField.GetValue(null)!);
+            typeof(TargetHooks).GetField("_lastActualCursorY", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(_sut, 690);
+            // Move down to hit the edge
+            InvokeCallback(0, 550, 705, (IntPtr)WM_MOUSEMOVE, 0, 0);
+            Assert.IsFalse((bool)_remoteStreamingField.GetValue(null)!, "Streaming should end after hitting bottom edge when exited from Up");
         }
 
         [TestMethod]
         public void TryEdgeReturn_FromDownDirection_HitsTopEdge_EndsStreaming()
         {
+            // Setup test seam for GetCursorPos to return controlled values
+            SetupTestGetCursorPos();
+
             _udpTransmitterField.SetValue(_sut, _realConcreteUdp);
             _realConcreteUdp!.SetLocalRole(ConnectionRole.Sender);
-            _remoteStreamingField.SetValue(null, true);
-            _remoteStreamingDirectionField.SetValue(null, OmniMouse.Switching.Direction.Down);
+            
             string remoteId = "Remote-Down";
             TargetHooks.SetRemotePeer(remoteId);
             _realScreenMap!.AddOrUpdateClient(new ClientPc { ClientId = remoteId, FriendlyName = "Remote" });
@@ -997,13 +1227,30 @@
                 GlobalBounds = new RectInt(800, 300, 150, 300),
                 LocalBounds = new RectInt(0, 0, 150, 300)
             });
-            // Cursor at top edge
+            
+            // Set streaming state AFTER screen map is configured
+            _remoteStreamingField.SetValue(null, true);
+            _remoteStreamingDirectionField.SetValue(null, OmniMouse.Switching.Direction.Down);
+
+            // Set receiver reported edge hit flag (simulates multi-machine handshake)
+            var receiverEdgeHitField = typeof(TargetHooks).GetField("_receiverReportedEdgeHit", BindingFlags.Static | BindingFlags.NonPublic);
+            receiverEdgeHitField?.SetValue(null, true);
+
+            // Set accumulator above threshold (40 pixels)
+            _remoteStreamingReleaseAccumField.SetValue(null, 50);
+            
+            // Cursor near top edge
             _remoteCursorXField.SetValue(null, 850);
-            _remoteCursorYField.SetValue(null, 300);
+            _remoteCursorYField.SetValue(null, 302); // near top (top=300)
+
+            // Set test cursor position
+            SetTestCursorPosition(850, 295);
+
             typeof(TargetHooks).GetField("_lastActualCursorX", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(_sut, 850);
-            typeof(TargetHooks).GetField("_lastActualCursorY", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(_sut, 300);
-            InvokeCallback(0, 850, 300, (IntPtr)WM_MOUSEMOVE, 0, 0);
-            Assert.IsFalse((bool)_remoteStreamingField.GetValue(null)!);
+            typeof(TargetHooks).GetField("_lastActualCursorY", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(_sut, 310);
+            // Move up to hit the edge
+            InvokeCallback(0, 850, 295, (IntPtr)WM_MOUSEMOVE, 0, 0);
+            Assert.IsFalse((bool)_remoteStreamingField.GetValue(null)!, "Streaming should end after hitting top edge when exited from Down");
         }
 
         [TestMethod]

@@ -37,6 +37,7 @@ namespace OmniMouse.Network
         private const byte MSG_HANDSHAKE_ACCEPT = 0x11;
         private const byte MSG_ROLE_SWITCH_REQUEST = 0x12;
         private const byte MSG_ROLE_SWITCH_ACCEPT = 0x13;
+        private const byte MSG_DISCONNECT = 0x14; // Graceful disconnect notification
         private const byte MSG_NORMALIZED_MOUSE = 0x01;
         private const byte MSG_LEGACY_MOUSE = 0x02;
         private const byte MSG_MOUSE = 0x03; // Unified mouse message (absolute or relative with sentinel)
@@ -47,7 +48,9 @@ namespace OmniMouse.Network
         private const byte MSG_LAYOUT_ANNOUNCE = 0x40;  // Machine announces position choice
         private const byte MSG_LAYOUT_SYNC = 0x41;      // Full layout broadcast
         private const byte MSG_LAYOUT_UPDATE = 0x42;    // Single machine position update
+        private const byte MSG_GRID_LAYOUT_UPDATE = 0x44; // Grid position update (2x2)
         private const byte MSG_MONITOR_INFO = 0x43;     // Monitor information exchange
+        private const byte MSG_FILE_OFFER = 0x50;       // File transfer offer notification
         
         // When |X| >= MOVE_MOUSE_RELATIVE && |Y| >= MOVE_MOUSE_RELATIVE, it's a relative delta
         // Actual delta = (value < 0 ? value + MOVE_MOUSE_RELATIVE : value - MOVE_MOUSE_RELATIVE)
@@ -81,6 +84,19 @@ namespace OmniMouse.Network
         // Events
         public event Action<ConnectionRole>? RoleChanged;
         public event Action<int, int>? TakeControlReceived;
+        public event Action<FileShare.FileOfferPacket>? FileOfferReceived;
+        public event Action? PeerDisconnected;
+        
+        /// <summary>
+        /// Gets whether the handshake with a peer is complete.
+        /// </summary>
+        public bool IsHandshakeComplete
+        {
+            get
+            {
+                lock (_roleLock) return _handshakeComplete;
+            }
+        }
 
         // Seamless switching feature toggle (true = dynamic sender claim via edge detection)
         public bool SeamlessMode { get; set; } = true;
@@ -104,7 +120,7 @@ namespace OmniMouse.Network
             {
                 _clientEndpoints[clientId] = endpoint;
             }
-            Console.WriteLine($"[UDP] Registered endpoint for {clientId} -> {endpoint.Address}:{endpoint.Port}");
+            //Console.WriteLine($"[UDP] Registered endpoint for {clientId} -> {endpoint.Address}:{endpoint.Port}");
         }
         
         /// <summary>
@@ -114,7 +130,7 @@ namespace OmniMouse.Network
         {
             _localScreenMap = screenMap ?? throw new ArgumentNullException(nameof(screenMap));
             _localClientId = clientId ?? throw new ArgumentNullException(nameof(clientId));
-            Console.WriteLine($"[UDP] Registered local screen map with {screenMap.GetMonitorsSnapshot().Count} monitors for clientId={clientId}");
+            //Console.WriteLine($"[UDP] Registered local screen map with {screenMap.GetMonitorsSnapshot().Count} monitors for clientId={clientId}");
 
             // Emit consolidated layout summary immediately after local registration
             this.DumpLayoutSummary("[UDP][MonitorSync] Layout after local monitors registered");
@@ -124,7 +140,7 @@ namespace OmniMouse.Network
             {
                 if (_pendingMonitorPackets.Count > 0)
                 {
-                    Console.WriteLine($"[UDP][MonitorSync] Processing {_pendingMonitorPackets.Count} queued monitor packet(s)");
+                    //Console.WriteLine($"[UDP][MonitorSync] Processing {_pendingMonitorPackets.Count} queued monitor packet(s)");
                     while (_pendingMonitorPackets.Count > 0)
                     {
                         var (data, offset, source) = _pendingMonitorPackets.Dequeue();
@@ -139,7 +155,10 @@ namespace OmniMouse.Network
             if (ready)
             {
                 Console.WriteLine("[UDP][MonitorSync] Handshake complete; sending monitors after late registration.");
-                try { SendMonitorInfo(); } catch (Exception ex) { Console.WriteLine($"[UDP][MonitorSync] Deferred send failed: {ex.Message}"); }
+                try { SendMonitorInfo(); } catch (Exception ex) {
+                    // Console.WriteLine($"[UDP][MonitorSync] Deferred send failed: {ex.Message}");
+                    }
+
                 // Layout after sending local monitors to peer (no change locally, but helpful log)
                 this.DumpLayoutSummary("[UDP][MonitorSync] Layout after sending local monitors to peer");
             }
@@ -152,14 +171,14 @@ namespace OmniMouse.Network
             {
                 _clientEndpoints.Remove(clientId);
             }
-            Console.WriteLine($"[UDP] Unregistered endpoint for {clientId}");
+            //Console.WriteLine($"[UDP] Unregistered endpoint for {clientId}");
         }
 
         // Connection management
         public void StartHost()
         {
             _udpClient = _udpClientFactoryWithPort(UdpPort);
-            Console.WriteLine($"[UDP] Host listening on {UdpPort}. LocalId={_localLowestIpV4}");
+            //Console.WriteLine($"[UDP] Host listening on {UdpPort}. LocalId={_localLowestIpV4}");
 
             TryEnsureFirewallRules();
             StartTcpControlListener();
@@ -186,7 +205,7 @@ namespace OmniMouse.Network
             _remoteEndPoint = new IPEndPoint(ip.MapToIPv4(), UdpPort);
 
             _udpClient = _udpClientFactoryWithPort(UdpPort);
-            Console.WriteLine($"[UDP] CoHost using local port {_udpClient.Client.LocalEndPoint} -> {_remoteEndPoint.Address}:{_remoteEndPoint.Port}, LocalId={_localLowestIpV4}");
+            //Console.WriteLine($"[UDP] CoHost using local port {_udpClient.Client.LocalEndPoint} -> {_remoteEndPoint.Address}:{_remoteEndPoint.Port}, LocalId={_localLowestIpV4}");
             lock (_roleLock)
             {
                 _currentRole = ConnectionRole.Receiver;
@@ -206,7 +225,7 @@ namespace OmniMouse.Network
 
             _remoteEndPoint = new IPEndPoint(ip.MapToIPv4(), UdpPort);
             _udpClient = _udpClientFactoryWithPort(UdpPort);
-            Console.WriteLine($"[UDP] Peer mode bound {UdpPort}, remote {_remoteEndPoint.Address}:{_remoteEndPoint.Port}, LocalId={_localLowestIpV4}");
+            //Console.WriteLine($"[UDP] Peer mode bound {UdpPort}, remote {_remoteEndPoint.Address}:{_remoteEndPoint.Port}, LocalId={_localLowestIpV4}");
             lock (_roleLock)
             {
                 _currentRole = ConnectionRole.Receiver;
@@ -228,7 +247,7 @@ namespace OmniMouse.Network
                 throw new FormatException("Invalid peer IP/hostname.");
 
             _remoteEndPoint = new IPEndPoint(ip.MapToIPv4(), UdpPort);
-            Console.WriteLine($"[UDP] Remote endpoint set to {_remoteEndPoint.Address}:{_remoteEndPoint.Port}");
+            //Console.WriteLine($"[UDP] Remote endpoint set to {_remoteEndPoint.Address}:{_remoteEndPoint.Port}");
 
             lock (_roleLock)
             {
@@ -241,12 +260,92 @@ namespace OmniMouse.Network
             }
         }
 
+        /// <summary>
+        /// Sets the remote peer using a discovered IPEndPoint and initiates handshake.
+        /// This is used by mDNS auto-discovery to connect without manual IP entry.
+        /// </summary>
+        public void SetRemotePeer(IPEndPoint endpoint)
+        {
+            if (endpoint == null)
+                throw new ArgumentNullException(nameof(endpoint));
+
+            _remoteEndPoint = new IPEndPoint(endpoint.Address.MapToIPv4(), endpoint.Port);
+            //Console.WriteLine($"[UDP] Remote endpoint set to {_remoteEndPoint.Address}:{_remoteEndPoint.Port} (auto-discovered)");
+
+            lock (_roleLock)
+            {
+                _handshakeComplete = false;
+            }
+
+            if (_udpClient != null)
+            {
+                BeginHandshake();
+            }
+        }
+
+        /// <summary>
+        /// Starts the UDP client in listening mode without a known peer.
+        /// Used with mDNS discovery - peer will be set when discovered.
+        /// </summary>
+        public void StartListening()
+        {
+            if (_udpClient != null)
+            {
+                //Console.WriteLine("[UDP] Already listening");
+                return;
+            }
+
+            _udpClient = _udpClientFactoryWithPort(UdpPort);
+            //Console.WriteLine($"[UDP] Listening on {UdpPort} for auto-discovery. LocalId={_localLowestIpV4}");
+
+            TryEnsureFirewallRules();
+            StartTcpControlListener();
+
+            lock (_roleLock)
+            {
+                _currentRole = ConnectionRole.Receiver;
+                _handshakeComplete = false;
+            }
+            
+            StartReceiveLoop();
+        }
+
         public void Disconnect()
         {
+            //Console.WriteLine("[UDP] Disconnect requested");
+            
+            // Send disconnect notification to peer before closing
+            try
+            {
+                if (_udpClient != null && _remoteEndPoint != null && _handshakeComplete)
+                {
+                    var disconnectMsg = new byte[] { MSG_DISCONNECT };
+                    _udpClient.Send(disconnectMsg, disconnectMsg.Length, _remoteEndPoint);
+                    //Console.WriteLine($"[UDP] Sent disconnect notification to {_remoteEndPoint}");
+                }
+            }
+            catch (Exception ex)
+            {
+                //Console.WriteLine($"[UDP] Failed to send disconnect notification: {ex.Message}");
+            }
+
+            // Reset all InputHooks state (streaming, edge detection, etc.)
+            InputHooks.ResetPeerConnectionState();
+
             CancelHandshakeTimer();
 
             _running = false;
             _handshakeComplete = false;
+            
+            // Reset role to default Receiver state
+            lock (_roleLock)
+            {
+                _currentRole = ConnectionRole.Receiver;
+            }
+            
+            // Clear remote endpoint so we don't try to send more data
+            _remoteEndPoint = null;
+            
             try { _udpClient?.Close(); } catch { }
             try { _udpClient?.Dispose(); } catch { }
             _udpClient = null;
@@ -290,14 +389,14 @@ namespace OmniMouse.Network
                 Name = "UdpMouseTransmitter.ReceiveLoop"
             };
 
-            Console.WriteLine("[UDP][RecvLoop] Starting thread...");
+            //Console.WriteLine("[UDP][RecvLoop] Starting thread...");
             _recvThread.Start();
         }
 
         public void LogDiagnostics()
         {
             var iters = Interlocked.Read(ref _recvLoopIterations);
-            Console.WriteLine($"[UDP][Diag] running={_running}, role={_currentRole}, handshakeComplete={_handshakeComplete}, remoteEP={_remoteEndPoint?.ToString() ?? "<null>"}, attempts={_hsAttempts}, inProgress={_hsInProgress}, iterations={iters}, lastAlive={_recvLoopLastAlive:O}");
+            //Console.WriteLine($"[UDP][Diag] running={_running}, role={_currentRole}, handshakeComplete={_handshakeComplete}, remoteEP={_remoteEndPoint?.ToString() ?? "<null>"}, attempts={_hsAttempts}, inProgress={_hsInProgress}, iterations={iters}, lastAlive={_recvLoopLastAlive:O}");
         }
 
         // Add this public property to expose the role (read-only for external consumers)
@@ -330,13 +429,24 @@ namespace OmniMouse.Network
                 if (_currentRole == ConnectionRole.Sender) return true;
                 _currentRole = ConnectionRole.Sender;
             }
-            Console.WriteLine("[UDP] Sender role claimed locally.");
+            //Console.WriteLine("[UDP] Sender role claimed locally.");
             RoleChanged?.Invoke(ConnectionRole.Sender);
             return true;
         }
 
         [DllImport("user32.dll")]
         private static extern bool SetCursorPos(int X, int Y);
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool GetCursorPos(out POINT lpPoint);
+
+        [StructLayout(LayoutKind.Sequential)]
+        internal struct POINT
+        {
+            public int x;
+            public int y;
+        }
 
         // Runtime firewall rule provisioning (best-effort; requires elevation)
         private static void TryEnsureFirewallRules()
@@ -351,7 +461,7 @@ namespace OmniMouse.Network
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[Firewall] Failed to ensure firewall rules (non-fatal): {ex.Message}");
+                //Console.WriteLine($"[Firewall] Failed to ensure firewall rules (non-fatal): {ex.Message}");
             }
         }
 
@@ -381,8 +491,20 @@ namespace OmniMouse.Network
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[Firewall] PowerShell invocation failed: {ex.Message}");
+                //Console.WriteLine($"[Firewall] PowerShell invocation failed: {ex.Message}");
             }
+        }
+
+        /// <summary>
+        /// Public helper for direct UDP sends (used by preflight verification).
+        /// </summary>
+        public void SendDirect(byte[] data, int length)
+        {
+            if (_udpClient == null || _remoteEndPoint == null)
+            {
+                throw new InvalidOperationException("UDP client not initialized or remote endpoint unknown");
+            }
+            _udpClient.Send(data, length, _remoteEndPoint);
         }
     }
 

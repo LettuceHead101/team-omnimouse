@@ -22,5 +22,48 @@ namespace OmniMouse.Views.UserControls
         {
             ViewModel?.Cleanup();
         }
+
+        private void HomePage_DragEnter(object sender, DragEventArgs e)
+        {
+            if (e.Data.GetDataPresent(DataFormats.FileDrop))
+            {
+                e.Effects = DragDropEffects.Copy;
+                DragOverlay.Visibility = Visibility.Visible;
+            }
+            else
+            {
+                e.Effects = DragDropEffects.None;
+                DragOverlay.Visibility = Visibility.Collapsed;
+            }
+            e.Handled = true;
+        }
+
+        private void HomePage_DragOver(object sender, DragEventArgs e)
+        {
+            if (e.Data.GetDataPresent(DataFormats.FileDrop))
+            {
+                e.Effects = DragDropEffects.Copy;
+                DragOverlay.Visibility = Visibility.Visible;
+            }
+            else
+            {
+                e.Effects = DragDropEffects.None;
+                DragOverlay.Visibility = Visibility.Collapsed;
+            }
+            e.Handled = true;
+        }
+
+        private void HomePage_DragLeave(object sender, DragEventArgs e)
+        {
+            DragOverlay.Visibility = Visibility.Collapsed;
+            e.Handled = true;
+        }
+
+        private void HomePage_Drop(object sender, DragEventArgs e)
+        {
+            DragOverlay.Visibility = Visibility.Collapsed;
+            ViewModel?.HandleFileDrop(e);
+            e.Handled = true;
+        }
     }
 }

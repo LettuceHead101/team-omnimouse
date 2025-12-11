@@ -4,19 +4,21 @@ using OmniMouse.Network;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Net;
 using System.Threading;
 using System.Windows;
 using System.Windows.Input;
 namespace OmniMouse.ViewModel
 {
-    public class HomePageViewModel : ViewModelBase
+    public partial class HomePageViewModel : ViewModelBase
     {
         private InputHooks? _hooks;
         private UdpMouseTransmitter? _udp;
+        private MdnsDiscoveryService? _mdns;
         private OmniMouse.Switching.IMultiMachineSwitcher? _switcher;
         private OmniMouse.Switching.NetworkSwitchCoordinator? _switchCoordinator;
         private string _consoleOutput = string.Empty;
-        private string _remoteHostIps = string.Empty;  // Comma-separated list of remote hosts
+        private string _discoveryStatus = "Not connected";
         private bool _isConnected;
         private bool _isMouseSource;  // True if this PC is actively sending input (post-handshake)
         private bool _isPeerConfirmed; // True once handshake/connectivity is confirmed
@@ -25,6 +27,13 @@ namespace OmniMouse.ViewModel
         private const int MaxConsoleLines = 50;
 
         private string? _primaryPeerId;
+        private FileShareViewModel? _fileShareViewModel;
+
+        public FileShareViewModel? FileShareViewModel
+        {
+            get => _fileShareViewModel;
+            set => SetProperty(ref _fileShareViewModel, value);
+        }
 
         public string ConsoleOutput 
         { 
@@ -32,10 +41,24 @@ namespace OmniMouse.ViewModel
             set => SetProperty(ref _consoleOutput, value);
         }
 
-        public string RemoteHostIps
+        public string DiscoveryStatus
         {
-            get => _remoteHostIps;
-            set => SetProperty(ref _remoteHostIps, value);
+            get => _discoveryStatus;
+            set => SetProperty(ref _discoveryStatus, value);
+        }
+
+        private string _manualIpAddress = string.Empty;
+        public string ManualIpAddress
+        {
+            get => _manualIpAddress;
+            set => SetProperty(ref _manualIpAddress, value);
+        }
+
+        // Backward compatibility for tests
+        public string HostIp
+        {
+            get => _manualIpAddress;
+            set => SetProperty(ref _manualIpAddress, value);
         }
 
         public bool IsMouseSource
@@ -65,10 +88,11 @@ namespace OmniMouse.ViewModel
         public ICommand StartAsReceiverCommand { get; }
         public ICommand DisconnectCommand { get; }
         public ICommand ShowLayoutCommand { get; }
+        public ICommand ConnectToIpCommand { get; }
 
         private Views.LayoutSelectionView? _layoutWindow; // persistent modeless layout window
-        private bool _layoutDialogActive = false; // added: track active modal dialog
-        private bool _layoutConfigured = false; // <--- ADD THIS FLAG
+        private bool _layoutDialogActive = false;
+        private bool _layoutConfigured = false;
 
         public HomePageViewModel()
         {
@@ -76,6 +100,10 @@ namespace OmniMouse.ViewModel
             StartAsReceiverCommand = new RelayCommand(ExecuteStartAsReceiver, CanExecuteConnect);
             DisconnectCommand = new RelayCommand(ExecuteDisconnect, CanExecuteDisconnect);
             ShowLayoutCommand = new RelayCommand(_ => ShowOrCreateLayoutWindow(), _ => _udp?.LayoutCoordinator != null);
+            ConnectToIpCommand = new RelayCommand(ExecuteConnectToIp, _ => IsConnected && !string.IsNullOrWhiteSpace(ManualIpAddress));
+
+            // Ensure Upload works even before connection; will log if not connected
+            UploadFileCommand ??= new RelayCommand(_ => ExecuteUploadFile());
 
             App.ConsoleOutputReceived += OnConsoleOutputReceived;
         }
@@ -87,16 +115,25 @@ namespace OmniMouse.ViewModel
             // Wire event BEFORE starting, to avoid missing early role events
             WireRoleChanged(_udp);
 
+            // Start UDP listener (peer will be set when discovered)
+            _udp.StartListening();
+            _udp.LogDiagnostics();
+
+            // Start mDNS discovery service
+            _mdns = new MdnsDiscoveryService();
+            _mdns.PeerDiscovered += OnPeerDiscovered;
+            _mdns.PeerLost += OnPeerLost;
+            _mdns.StatusChanged += OnDiscoveryStatusChanged;
+            _mdns.Start();
+
             // Session opened; role activation deferred until handshake confirms
             IsConnected = true;
             IsPeerConfirmed = false;
             IsMouseSource = false;
-            WriteToConsole("[UI] Host started. Waiting for peer/handshake...");
+            WriteToConsole("[UI] Started. Searching for peers via mDNS...");
 
-            _udp.StartHost();
-            _udp.LogDiagnostics(); // immediate state dump
-
-            // Hooks will be installed when RoleChanged confirms Sender
+            // Initialize file sharing after UDP is started
+            InitializeFileSharing();
         }
 
         private void ExecuteStartAsReceiver(object? parameter)
@@ -106,27 +143,63 @@ namespace OmniMouse.ViewModel
             // Wire event BEFORE starting, to avoid missing early role events
             WireRoleChanged(_udp);
 
-            // Session opened; waiting for handshake confirmation with remote
+            // Start UDP listener (peer will be set when discovered)
+            _udp.StartListening();
+            _udp.LogDiagnostics();
+
+            // Start mDNS discovery service
+            _mdns = new MdnsDiscoveryService();
+            _mdns.PeerDiscovered += OnPeerDiscovered;
+            _mdns.PeerLost += OnPeerLost;
+            _mdns.StatusChanged += OnDiscoveryStatusChanged;
+            _mdns.Start();
+
+            // Session opened; waiting for peer discovery and handshake
             IsConnected = true;
             IsPeerConfirmed = false;
             IsMouseSource = false;
-            WriteToConsole($"[UI] CoHost started. Attempting handshake to '{RemoteHostIps}'...");
+            WriteToConsole("[UI] Started. Searching for peers via mDNS...");
 
-            _udp.StartCoHost(RemoteHostIps);
-            _udp.LogDiagnostics(); // immediate state dump
+            // Initialize file sharing after UDP is started
+            InitializeFileSharing();
         }
 
         private void ExecuteDisconnect(object? parameter)
         {
             WriteToConsole("Disconnecting...");
+            
+            // Unsubscribe from UDP events
             if (_udp != null)
+            {
                 _udp.RoleChanged -= OnUdpRoleChanged;
+                _udp.PeerDisconnected -= OnPeerDisconnected;
+            }
 
+            // Uninstall input hooks
             _hooks?.UninstallHooks();
             _hooks = null;
 
+            // Clean up switching infrastructure
+            _switchCoordinator?.Cleanup();
+            _switchCoordinator = null;
+            
+            _switcher?.Stop();
+            _switcher = null;
+
+            // Disconnect UDP and reset networking
             _udp?.Disconnect();
             _udp = null;
+
+            // Stop mDNS discovery
+            if (_mdns != null)
+            {
+                _mdns.PeerDiscovered -= OnPeerDiscovered;
+                _mdns.PeerLost -= OnPeerLost;
+                _mdns.StatusChanged -= OnDiscoveryStatusChanged;
+                _mdns.Stop();
+                _mdns.Dispose();
+                _mdns = null;
+            }
 
             // Close persistent layout window if open
             if (_layoutWindow != null)
@@ -135,9 +208,16 @@ namespace OmniMouse.ViewModel
                 _layoutWindow = null;
             }
 
+            // Reset all state flags
             IsMouseSource = false;
             IsPeerConfirmed = false;
             IsConnected = false;
+            _layoutConfigured = false;
+            _layoutDialogActive = false;
+            _primaryPeerId = null;
+            DiscoveryStatus = "Not connected";
+            
+            WriteToConsole("[UI] Disconnected - all state reset");
         }
 
         private bool CanExecuteConnect(object? parameter) => !IsConnected;
@@ -247,6 +327,93 @@ namespace OmniMouse.ViewModel
         private void WireRoleChanged(UdpMouseTransmitter udp)
         {
             udp.RoleChanged += OnUdpRoleChanged;
+            udp.PeerDisconnected += OnPeerDisconnected;
+        }
+
+        private void OnPeerDiscovered(IPEndPoint endpoint, string peerId)
+        {
+            Application.Current?.Dispatcher?.BeginInvoke(new Action(() =>
+            {
+                WriteToConsole($"[UI][mDNS] Peer discovered: {endpoint.Address} (ID: {peerId})");
+                
+                if (_udp != null)
+                {
+                    // Ignore peer discoveries if already connected (prevent reconnection loops)
+                    if (_udp.IsHandshakeComplete)
+                    {
+                        WriteToConsole($"[UI][mDNS] Already connected - ignoring peer discovery");
+                        return;
+                    }
+                    
+                    // Set the remote peer and initiate handshake
+                    _udp.SetRemotePeer(endpoint);
+                    WriteToConsole($"[UI][mDNS] Initiating handshake with {endpoint.Address}...");
+                }
+            }));
+        }
+
+        private void OnPeerLost(string peerId)
+        {
+            Application.Current?.Dispatcher?.BeginInvoke(new Action(() =>
+            {
+                WriteToConsole($"[UI][mDNS] Peer lost: {peerId}");
+            }));
+        }
+
+        private void OnDiscoveryStatusChanged(string status)
+        {
+            Application.Current?.Dispatcher?.BeginInvoke(new Action(() =>
+            {
+                DiscoveryStatus = status;
+            }));
+        }
+
+        private void ExecuteConnectToIp(object? parameter)
+        {
+            if (_udp == null || string.IsNullOrWhiteSpace(ManualIpAddress))
+                return;
+
+            try
+            {
+                WriteToConsole($"[UI] Manual connection to {ManualIpAddress}...");
+                
+                // Parse IP and create endpoint
+                if (!IPAddress.TryParse(ManualIpAddress.Trim(), out var ip))
+                {
+                    WriteToConsole($"[UI][ERROR] Invalid IP address: {ManualIpAddress}");
+                    DiscoveryStatus = $"Invalid IP: {ManualIpAddress}";
+                    return;
+                }
+
+                var endpoint = new IPEndPoint(ip, 5000);
+                
+                // Use the same method that mDNS discovery uses
+                _udp.SetRemotePeer(endpoint);
+                
+                DiscoveryStatus = $"Connecting to {ManualIpAddress}...";
+                WriteToConsole($"[UI] Handshake initiated with {ManualIpAddress}");
+            }
+            catch (Exception ex)
+            {
+                WriteToConsole($"[UI][ERROR] Failed to connect: {ex.Message}");
+                DiscoveryStatus = $"Connection failed: {ex.Message}";
+            }
+        }
+
+        private void OnPeerDisconnected()
+        {
+            Application.Current?.Dispatcher?.BeginInvoke(new Action(() =>
+            {
+                WriteToConsole("[UI][Disconnect] Peer disconnected gracefully");
+                
+                // Reset connection state but keep IsConnected true so we can reconnect
+                IsPeerConfirmed = false;
+                IsMouseSource = false;
+                _layoutConfigured = false;
+                _primaryPeerId = null;
+                
+                WriteToConsole("[UI][Disconnect] State reset - waiting for peer to reconnect...");
+            }));
         }
 
         private void OnUdpRoleChanged(ConnectionRole role)
@@ -421,29 +588,53 @@ namespace OmniMouse.ViewModel
         public void Cleanup()
         {
             App.ConsoleOutputReceived -= OnConsoleOutputReceived;
+            
             if (_udp != null)
+            {
                 _udp.RoleChanged -= OnUdpRoleChanged;
+                _udp.PeerDisconnected -= OnPeerDisconnected;
+            }
 
             _hooks?.UninstallHooks();
             _hooks = null;
 
+            _switchCoordinator?.Cleanup();
+            _switchCoordinator = null;
+            
             _switcher?.Stop();
             _switcher = null;
-            _switchCoordinator = null;
 
             _udp?.Disconnect();
             _udp = null;
 
+            // Cleanup mDNS service
+            if (_mdns != null)
+            {
+                _mdns.PeerDiscovered -= OnPeerDiscovered;
+                _mdns.PeerLost -= OnPeerLost;
+                _mdns.StatusChanged -= OnDiscoveryStatusChanged;
+                _mdns.Stop();
+                _mdns.Dispose();
+                _mdns = null;
+            }
+
+            // Close persistent layout window
+            if (_layoutWindow != null)
+            {
+                try { _layoutWindow.Close(); } catch { }
+                _layoutWindow = null;
+            }
+
             IsMouseSource = false;
             IsPeerConfirmed = false;
             IsConnected = false;
-            _layoutConfigured = false; // setting the flag to true here so it doesn't pop up again on repeated calls
-        }
+            _layoutConfigured = false;
+            _layoutDialogActive = false;
+            _primaryPeerId = null;
+            DiscoveryStatus = "Not connected";
 
-        public string HostIp
-        {
-            get => RemoteHostIps;
-            set => RemoteHostIps = value;
+            // Cleanup file sharing resources
+            CleanupFileSharing();
         }
 
         // Use receiver mode as the default "Connect" action for UI simplicity
